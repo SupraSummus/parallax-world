@@ -14,6 +14,7 @@ Entry point for AI agents working on this codebase. Read this first.
 | [docs/generators.md](docs/generators.md) | Generating worlds in pieces: layers, things, rules | Writing or changing a world generator |
 | [docs/checks.md](docs/checks.md) | The contract worlds keep, checks of places and directions, what generating costs | A world's check or cost fails |
 | [docs/light.md](docs/light.md) | Light: what the prototype gets wrong, what was tried, what it costs | Touching `light/` or native's lighting |
+| [docs/statics.md](docs/statics.md) | Statics, an experiment: what stands and what falls, what was measured | Touching `statics/`, or physics |
 | [.claude/skills/lead/SKILL.md](.claude/skills/lead/SKILL.md) | The lead role: driving changes to main through delegated work and PRs | Only when the user asks for it (`/lead`) |
 
 Each concept has one home:
@@ -114,6 +115,10 @@ worlds/                      # The worlds, on worldgen's and ground's public API
 │                            # scenes/ is not in git (docs/generators.md, "Scenes")
 ├── tests/                   # Its worlds keep the contract and their cost baselines (checks.rs); scenes
 └── examples/                # map, look, check, cost, bench: a world looked at, checked, measured
+statics/                     # Statics, an experiment (docs/statics.md), linted but not tested by pnpm
+├── src/                     # Rigid voxels joined on their faces (model.rs), on 2^l·FCC (lattice.rs);
+│                            # coarser bodies of them, checked inside (coarse.rs)
+└── examples/statics.rs      # The experiments
 lab/                         # Experiment, linted but not tested by pnpm (see src/lib.rs); scripts/overture.py fetches its real places
 native/src/                  # The frontend: egui on winit and wgpu; in browsers too (web/index.html)
 ├── main.rs                  # The camera, the panel, the command line
