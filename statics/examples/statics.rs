@@ -313,7 +313,7 @@ fn exp_edits(only: Option<String>) {
             hold_bulk(&mut g, 0.75);
             hold_bulk(&mut e, 0.75);
         }
-        let mut line = format!("{:36} used {:.2} -> {:.2}", edited.name, most_used(&g), most_used(&e));
+        print!("{:36} used {:.2} -> {:.2}", edited.name, most_used(&g), most_used(&e));
         for level in 0..=4 {
             if level > 0 {
                 g = gathered(&g);
@@ -323,8 +323,9 @@ fn exp_edits(only: Option<String>) {
             as_generated(&mut gs, &g);
             as_generated(&mut es, &g);
             let (before, after) = (settle(&gs), settle(&es));
-            line += &format!(" | {level}: {:3.0}% {:3.0}%", 100.0 * before.fallen, 100.0 * after.fallen);
+            print!(" | {level}: {:3.0}% {:3.0}%", 100.0 * before.fallen, 100.0 * after.fallen);
+            std::io::Write::flush(&mut std::io::stdout()).unwrap();
         }
-        println!("{line}");
+        println!();
     }
 }
