@@ -4,7 +4,7 @@
 //!
 //! Voxels of 2^l·FCC (lattice.rs) are rigid, joined by bonds on the faces
 //! they share, each a spring with a share of its face's area (model.rs);
-//! a coarser level's are gathered from the finer one's (`coarser`), and
+//! a coarser level's are gathered from the finer one's (gather.rs), and
 //! what lies deep in bulk is held (`hold_bulk`).
 //! The forces are all voxels' at once, found sooner by bodies within
 //! bodies (bodies.rs); a face whose stress passes its material's strength
@@ -14,5 +14,6 @@
 #![allow(clippy::needless_range_loop)]
 
 pub mod bodies;
+pub mod gather;
 pub mod lattice;
 pub mod model;

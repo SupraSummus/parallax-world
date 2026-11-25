@@ -37,7 +37,7 @@ struct Joint {
 
 /// A part's motion (translation at its centre, rotation) as seen at a
 /// point r from its centre: translation there, rotation.
-fn shift(x: Six, r: V3) -> Six {
+pub fn shift(x: Six, r: V3) -> Six {
     let u = add([x[0], x[1], x[2]], cross([x[3], x[4], x[5]], r));
     [u[0], u[1], u[2], x[3], x[4], x[5]]
 }
@@ -271,11 +271,30 @@ fn cycle(levels: &[Level], l: usize, r: &[Six], work: &mut Work) -> Vec<Six> {
     x
 }
 
-/// Each bond's force, on j's side (on i's, the opposite): `alive` bonds
-/// between voxels not `gone`, the rest none. All voxels at once, by
+/// Each bond's force, on j's side (on i's, the opposite), under weight:
+/// `alive` bonds between voxels not `gone`, the rest none.
+pub fn forces(lattice: &Lattice, alive: &[bool], gone: &[bool], work: &mut Work) -> Vec<V3> {
+    let weight = |v: usize| [0.0, -lattice.voxels[v].m * GRAVITY, 0.0, 0.0, 0.0, 0.0];
+    let x = motions(lattice, alive, gone, &weight, work);
+    let mut found = vec![[0.0; 3]; lattice.bonds.len()];
+    for (b, bond) in lattice.bonds.iter().enumerate() {
+        if alive[b] && !gone[bond.i] && !gone[bond.j] {
+            found[b] = bond.force(sub(at(lattice, &x, bond.j, bond.p), at(lattice, &x, bond.i, bond.p)));
+        }
+    }
+    found
+}
+
+/// Where a voxel's motion takes a point.
+pub fn at(lattice: &Lattice, x: &[Six], v: usize, p: V3) -> V3 {
+    shift(x[v], sub(p, lattice.voxels[v].x))[..3].try_into().unwrap()
+}
+
+/// Each voxel's motion (translation, rotation about its centre) under
+/// `loads`, held ones and `gone` ones at rest: all voxels at once, by
 /// conjugate gradients, preconditioned by V-cycles over bodies within
 /// bodies, till few are left, and those solved directly.
-pub fn forces(lattice: &Lattice, alive: &[bool], gone: &[bool], work: &mut Work) -> Vec<V3> {
+pub fn motions(lattice: &Lattice, alive: &[bool], gone: &[bool], loads: &dyn Fn(usize) -> Six, work: &mut Work) -> Vec<Six> {
     const FEW: usize = 64;
     let (voxels, bonds) = (&lattice.voxels, &lattice.bonds);
     let live: Vec<usize> = (0..bonds.len()).filter(|&b| alive[b] && !gone[bonds[b].i] && !gone[bonds[b].j]).collect();
@@ -306,19 +325,12 @@ pub fn forces(lattice: &Lattice, alive: &[bool], gone: &[bool], work: &mut Work)
     }
     let top = levels.last_mut().unwrap();
     top.direct = Some(Cholesky::of(top));
-    let loads: Vec<Six> =
-        (0..voxels.len()).filter(|&v| voxel[v].is_some()).map(|v| [0.0, -voxels[v].m * GRAVITY, 0.0, 0.0, 0.0, 0.0]).collect();
+    let loads: Vec<Six> = (0..voxels.len()).filter(|&v| voxel[v].is_some()).map(loads).collect();
     let mut inner = Work(0.0);
     let mut v_cycle = |r: &[Six]| cycle(&levels, 0, r, &mut inner);
     let x = conjugate_gradients(&levels[0], &loads, &mut v_cycle, 1e-12, work);
     work.0 += inner.0;
-    let moved = |v: usize, p: V3| voxel[v].map_or([0.0; 3], |k| shift(x[k], sub(p, voxels[v].x))[..3].try_into().unwrap());
-    let mut found = vec![[0.0; 3]; bonds.len()];
-    for &b in &live {
-        let (i, j, p) = (bonds[b].i, bonds[b].j, bonds[b].p);
-        found[b] = bonds[b].force(sub(moved(j, p), moved(i, p)));
-    }
-    found
+    (0..voxels.len()).map(|v| voxel[v].map_or([0.0; 6], |k| x[k])).collect()
 }
 
 /// The bodies of the next level: the connected pieces of each key's

@@ -68,7 +68,7 @@ fn axes(spread: &M3, n: V3) -> [(f64, V3); 2] {
 
 /// A face of a voxel of spacing s, toward neighbour e: a rhombus, its
 /// diagonals √2·s along p and s along q.
-fn face(e: [i64; 3], s: f64) -> (V3, f64, M3) {
+pub fn face(e: [i64; 3], s: f64) -> (V3, f64, M3) {
     let n = unit(e.map(|v| v as f64));
     let mut q = [0.0; 3];
     q[(0..3).find(|&k| e[k] == 0).unwrap()] = 1.0;
@@ -98,7 +98,7 @@ pub fn build(level: u32, lo: V3, hi: V3, fill: Fill) -> Lattice {
                 if let Some((mat, held)) = fill(x) {
                     index.insert([a, b, c], voxels.len());
                     let volume = 2.0 * s * s * s;
-                    voxels.push(Voxel { x, m: mat.rho * volume, volume, held });
+                    voxels.push(Voxel { x, m: mat.rho * volume, volume, mat, held });
                     sites.push([a, b, c].map(|v| v << level));
                     mats.push(mat);
                 }
@@ -132,113 +132,6 @@ pub fn coarse_site(p: [i64; 3], l: u32) -> [i64; 3] {
         r[k] += (q[k] - r[k]).signum();
     }
     r.map(|v| v as i64 * n as i64)
-}
-
-/// The same matter in the voxels of a coarser level: each a connected
-/// piece of the matter in a cell of 2^level·FCC, so that what only lies
-/// near is not joined (its mass, its centre, the volume of its matter,
-/// held if any of it is), and on each face between two such pieces the
-/// bonds of what crosses it, as `patch` keeps a face: the area the finer
-/// bonds bear across it, where, and how spread. So a coarse voxel weighs
-/// what its matter does, and its faces hold as what crosses them would.
-/// A finer bond between cells that are not neighbours is left out.
-pub fn coarser(fine: &Lattice, level: u32) -> (Lattice, f64) {
-    let s = spacing(level);
-    // A cell's matter, in its connected pieces: one coarse voxel each.
-    let key: Vec<[i64; 3]> = fine.sites.iter().map(|site| coarse_site(*site, level)).collect();
-    let mut parent: Vec<usize> = (0..fine.voxels.len()).collect();
-    fn find(p: &mut [usize], mut a: usize) -> usize {
-        while p[a] != a {
-            p[a] = p[p[a]];
-            a = p[a];
-        }
-        a
-    }
-    for b in &fine.bonds {
-        if key[b.i] == key[b.j] {
-            let (a, c) = (find(&mut parent, b.i), find(&mut parent, b.j));
-            parent[a] = c;
-        }
-    }
-    let mut index: HashMap<usize, usize> = HashMap::new();
-    let mut voxels: Vec<Voxel> = Vec::new();
-    let mut sites = Vec::new();
-    let cell: Vec<usize> = (0..fine.voxels.len())
-        .map(|v| {
-            let piece = find(&mut parent, v);
-            let k = *index.entry(piece).or_insert_with(|| {
-                voxels.push(Voxel { x: [0.0; 3], m: 0.0, volume: 0.0, held: false });
-                sites.push(key[v]);
-                voxels.len() - 1
-            });
-            let (c, f) = (&mut voxels[k], &fine.voxels[v]);
-            c.x = add(c.x, mul(f.x, f.m));
-            c.m += f.m;
-            c.volume += f.volume;
-            c.held |= f.held;
-            k
-        })
-        .collect();
-    for c in voxels.iter_mut() {
-        c.x = mul(c.x, 1.0 / c.m);
-    }
-    // What crosses each face: area, its first and second moments, by material.
-    struct Crossing {
-        area: f64,
-        first: V3,
-        second: M3,
-        mats: Vec<(Mat, f64)>,
-    }
-    let mut faces: HashMap<(usize, usize, usize), Crossing> = HashMap::new();
-    let (mut kept, mut left) = (0.0, 0.0);
-    for b in &fine.bonds {
-        let (ci, cj) = (cell[b.i], cell[b.j]);
-        if ci == cj || (voxels[ci].held && voxels[cj].held) {
-            continue;
-        }
-        let step = [0, 1, 2].map(|k| (sites[cj][k] - sites[ci][k]) >> level);
-        let Some(e) = NEIGHBOURS.iter().position(|e| *e == step) else {
-            left += b.a;
-            continue;
-        };
-        let n = unit(NEIGHBOURS[e].map(|v| v as f64));
-        let w = b.a * dot(b.n, n).abs();
-        kept += b.a;
-        let f = faces.entry((ci, cj, e)).or_insert(Crossing { area: 0.0, first: [0.0; 3], second: [[0.0; 3]; 3], mats: Vec::new() });
-        f.area += w;
-        f.first = add(f.first, mul(b.p, w));
-        for r in 0..3 {
-            for c in 0..3 {
-                f.second[r][c] += w * b.p[r] * b.p[c];
-            }
-        }
-        match f.mats.iter_mut().find(|(m, _)| m.name == b.mat.name) {
-            Some((_, a)) => *a += w,
-            None => f.mats.push((b.mat, w)),
-        }
-    }
-    let mut bonds = Vec::new();
-    let mut keys: Vec<_> = faces.keys().copied().collect();
-    keys.sort();
-    for key in keys {
-        let f = &faces[&key];
-        let (i, j, e) = key;
-        let n = unit(NEIGHBOURS[e].map(|v| v as f64));
-        let centre = mul(f.first, 1.0 / f.area);
-        // About the centre, flat on the face, and no less than a finer face's own.
-        let flat: M3 = std::array::from_fn(|r| std::array::from_fn(|c| if r == c { 1.0 } else { 0.0 } - n[r] * n[c]));
-        let about: M3 = std::array::from_fn(|r| std::array::from_fn(|c| f.second[r][c] / f.area - centre[r] * centre[c]));
-        let fine_spread = spacing(fine.level).powi(2) / 24.0;
-        let spread: M3 = std::array::from_fn(|r| {
-            std::array::from_fn(|c| {
-                let on: f64 = (0..3).map(|a| (0..3).map(|b| flat[r][a] * about[a][b] * flat[b][c]).sum::<f64>()).sum();
-                f.area * (on + fine_spread * flat[r][c])
-            })
-        });
-        let mat = f.mats.iter().max_by(|a, b| a.1.total_cmp(&b.1)).unwrap().0;
-        bonds.extend(patch(i, j, n, 2f64.sqrt() * s, f.area, centre, &spread, mat));
-    }
-    (Lattice { level, voxels, bonds, sites }, left / (kept + left))
 }
 
 /// Hold what lies deep in bulk: a voxel all of whose sites within `radius`

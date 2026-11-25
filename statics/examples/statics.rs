@@ -3,9 +3,11 @@
 //! compare [name]: scenes settled: what fell, at what cost;
 //! tree: a leaning tree cut deeper and deeper, does it fall;
 //! tower: a lattice tower, a leg cut, at every level;
-//! members: how much of their strength its members use, at every level.
+//! members: how much of their strength its members use, at every level;
+//! sponge: frames with and without braces gathered into sponges.
 
 use statics::bodies::*;
+use statics::gather::gathered;
 use statics::lattice::*;
 use statics::model::*;
 use std::time::Instant;
@@ -186,6 +188,7 @@ fn main() {
         Some("tree") => exp_tree(),
         Some("tower") => exp_tower(),
         Some("members") => exp_members(),
+        Some("sponge") => exp_sponge(),
         _ => eprintln!("cantilever | compare [name] | tree | tower"),
     }
 }
@@ -258,16 +261,16 @@ fn exp_tower() {
                 o.rounds,
                 t.elapsed().as_secs_f64()
             );
+            let mut coarse = fine;
             for level in 1..=4 {
-                let (coarse, left) = coarser(&fine, level);
+                coarse = gathered(&coarse);
                 let free = coarse.voxels.iter().filter(|v| !v.held).count();
                 let t = Instant::now();
                 let o = settle(&coarse);
                 println!(
-                    "{:>w$}  level {level} ({:.2} m), {free} free voxels, {:.1}% of bonds' area left out: fallen {:5.1}%  rounds {}  {:.2}s",
+                    "{:>w$}  level {level} ({:.2} m), {free} free voxels: fallen {:5.1}%  rounds {}  {:.2}s",
                     "",
                     spacing(level),
-                    100.0 * left,
                     100.0 * o.fallen,
                     o.rounds,
                     t.elapsed().as_secs_f64(),
@@ -287,8 +290,11 @@ fn exp_members() {
         hold_bulk(&mut fine, 0.75);
         println!("## {}: the most of steel's strength used, by height (m)", sc.name);
         println!("          {}", (0..10).map(|k| format!("{:>6}", format!("{}-{}", 3 * k, 3 * k + 3))).collect::<String>());
+        let mut lat = fine;
         for level in 0..=4 {
-            let lat = if level == 0 { coarser(&fine, 0).0 } else { coarser(&fine, level).0 };
+            if level > 0 {
+                lat = gathered(&lat);
+            }
             let alive = vec![true; lat.bonds.len()];
             let gone = vec![false; lat.voxels.len()];
             let f = forces(&lat, &alive, &gone, &mut Work(0.0));
@@ -306,6 +312,65 @@ fn exp_members() {
                 band[h] = band[h].max(u);
             }
             println!("level {level}   {}", band.iter().map(|u| format!("{u:6.2}")).collect::<String>());
+        }
+    }
+}
+
+/// The distance from x to the nearest multiple of a.
+fn off_grid(x: f64, a: f64) -> f64 {
+    (x - a * (x / a).round()).abs()
+}
+
+/// A block of steel frame, struts of radius r along the edges of cubes a
+/// wide; `braced`, one diagonal on every face too.
+fn frame(a: f64, r: f64, braced: bool, size: f64) -> impl Fn(V3) -> Option<(Mat, bool)> {
+    move |x: V3| {
+        if x.iter().any(|v| v.abs() > size / 2.0) {
+            return None;
+        }
+        let d = x.map(|v| off_grid(v, a));
+        let edge = (0..3).any(|k| {
+            let (p, q) = ((k + 1) % 3, (k + 2) % 3);
+            (d[p] * d[p] + d[q] * d[q]).sqrt() < r
+        });
+        let diagonal = braced
+            && (0..3).any(|k| {
+                let (p, q) = ((k + 1) % 3, (k + 2) % 3);
+                let across = off_grid(x[p] - x[q], a) / 2f64.sqrt();
+                (d[k] * d[k] + across * across).sqrt() < r
+            });
+        (edge || diagonal).then_some((STEEL, false))
+    }
+}
+
+fn exp_sponge() {
+    println!("## Frames of steel, cubes of 1 m, gathered into sponges: a cell of 2 m in the middle of a block,");
+    println!("   its stiffness and strength along each of the six directions, as shares of solid steel");
+    for r in [0.14, 0.2] {
+        for braced in [false, true] {
+            let fill = frame(1.0, r, braced, 10.0);
+            let mut lat = build(0, [-5.2; 3], [5.2; 3], &fill);
+            let fill_share = lat.voxels.len() as f64 / build(0, [-5.0; 3], [5.0; 3], &|_| Some((STEEL, false))).voxels.len() as f64;
+            for _ in 0..4 {
+                lat = gathered(&lat);
+            }
+            let middle = (0..lat.voxels.len()).min_by(|&p, &q| norm(lat.voxels[p].x).total_cmp(&norm(lat.voxels[q].x))).unwrap();
+            let mut along: Vec<(V3, f64, f64)> = lat
+                .bonds
+                .iter()
+                .filter(|b| b.i == middle || b.j == middle)
+                .step_by(PER_FACE)
+                .map(|b| (b.n, b.mat.e / STEEL.e, b.mat.ft / STEEL.ft))
+                .collect();
+            along.sort_by(|a, b| a.0.map(|v| (v * 10.0) as i64).cmp(&b.0.map(|v| (v * 10.0) as i64)));
+            along.dedup_by(|a, b| a.0.map(|v| v.abs()) == b.0.map(|v| v.abs()));
+            println!(
+                "{} r={r}: filled {:.2}; stiffness {}; strength {}",
+                if braced { "braced" } else { "frame " },
+                fill_share,
+                along.iter().map(|a| format!("{:.4}", a.1)).collect::<Vec<_>>().join(" "),
+                along.iter().map(|a| format!("{:.3}", a.2)).collect::<Vec<_>>().join(" ")
+            );
         }
     }
 }

@@ -132,41 +132,57 @@ and nothing need say where the ground is.
 Without it the world would fall whole:
 soil gives way under its own weight a few metres down.
 
-Each level is a statics of its own,
-its voxels gathered from the level below (`coarser`):
-one for each connected piece of the matter in a cell,
-weighing what that matter weighs, centred where it is;
-on each face between two pieces, four bonds,
-which keep the area, the centre and the spread of the matter crossing it,
-as a face of level 0 keeps its rhombus's.
-So a coarse voxel of a lattice tower is light but holds as its members do,
-and an edit changes only the cells it touches, at every level.
-A cell joining everything in it, not its pieces,
-made the tower a shell: its members bore a tenth of their load.
+Each level is a statics of its own, by the same rules,
+its voxels gathered from the level below (`statics/src/gather.rs`),
+each cell keeping as many numbers as any other.
+A voxel keeps what its matter weighs, and where;
+how stiff its matter is along each of the lattice's six directions,
+as a share of a cell full of it,
+found by straining the finer voxels in it evenly (homogenisation);
+and on each face, four bonds that keep the area, centre and spread
+of the matter crossing it, as a face of level 0 keeps its rhombus.
+About fifty numbers a cell.
+A full cell gathers to its material exactly (`solid_gathers_to_itself`),
+so a mountain is the same rock at every level.
+Gathered so, a frame of steel without braces, a fifth of it steel,
+is a sponge 0.6 % as stiff as steel; braced, 3 %
+(`statics sponge`):
+a sponge's stiffness comes of how its matter bears, not only how much there is.
 
-A tower 30 m high, of members 0.3 m across, a leg cut (`statics tower`):
-at level 0, 34 000 voxels, it falls in five minutes;
-gathered into 1 m voxels, 1 100, it falls in two seconds.
-Every level sees what the cut does,
-the most the members bear rising by half
-(`statics members`);
-but what they bear differs between levels by up to twice,
-so a structure near its strength stands at one level and falls at another:
-with steel weakened to fall only when cut,
-levels of 0.25, 0.5 and 2 m felled it whole too.
-Cells about a member's size see its pieces' corners;
-cells larger than a panel make its members stiffer than they are.
+A lattice tower is where it fails (`statics members`, `statics tower`).
+At levels whose cells are about a member's size or a panel's,
+what its members bear came out up to tens of times too much,
+the more the coarser, so it fell where level 0 stands:
+rigid cells joined by thin patches off their centres
+turn a truss into a frame, its members bent where they only pull,
+and a level gathered from such a level inherits the error.
+What else was tried:
+a share of strength found as the stiffness is, by an even strain,
+forces bonds that bear nothing in the truss
+and came out a hundred times too weak at 0.5 m;
+a sponge breaking at its material's strain, worse.
+Only cells parted into their connected pieces,
+each its own voxel, the faces between pieces kept
+(about twice off at most; commit d166d6c),
+kept what a member bears,
+but a cell then has as many voxels as pieces.
+
+So between the levels where a structure's members are resolved
+and those where a cell holds many of them, a sponge,
+lie a few levels where it is neither.
+A cell's few numbers cannot say which of its faces its matter joins:
+that takes a share for each pair of faces,
+or a few pieces to a cell at most.
+Light has the same gap, in walls thinner than its sites.
 
 ## Where it is to go
 
-What a cell's pieces do inside, a coarse level can only guess
-as long as each piece is rigid.
-A cell can be solved alone at the level below,
-once when it is made or edited:
-how its faces move together (its stiffness, numerically coarsened),
-and the most stress inside it for each way they may be loaded.
-Then a coarse level bears and breaks as its cells' insides would,
-and levels agree where they overlap.
+The gap above first: a fixed few pieces to a cell,
+or a share for each pair of its faces,
+measured against level 0 on the tower, the tree and the slab,
+and a lattice tall enough to be a sponge at its coarsest levels.
+What holds is still whatever is deep in bulk within a radius in metres;
+by the same rule at every level, it would be in sites.
 And the levels are to be tied as light's are:
 the finer where it is made, the coarser beyond,
 a finer level taking its boundary's forces from the coarser.

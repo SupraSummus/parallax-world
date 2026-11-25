@@ -89,8 +89,10 @@ impl Mat {
 pub struct Voxel {
     pub x: V3,
     pub m: f64,
-    /// The volume of the matter in it.
+    /// The volume of the cell it fills.
     pub volume: f64,
+    /// What most of it is.
+    pub mat: Mat,
     pub held: bool,
 }
 
