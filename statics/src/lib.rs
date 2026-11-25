@@ -3,7 +3,9 @@
 //! taken off it whole.
 //!
 //! Voxels of 2^l·FCC (lattice.rs) are rigid, joined by bonds on the faces
-//! they share, each a spring with a share of its face's area (model.rs).
+//! they share, each a spring with a share of its face's area (model.rs);
+//! a coarser level's are gathered from the finer one's (`coarser`), and
+//! what lies deep in bulk is held (`hold_bulk`).
 //! The forces are all voxels' at once, found sooner by bodies within
 //! bodies (bodies.rs); a face whose stress passes its material's strength
 //! breaks, and what no longer holds to the ground falls (`settle`).

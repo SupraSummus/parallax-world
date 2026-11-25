@@ -1,7 +1,9 @@
 //! The statics experiments (docs/statics.md), one per argument:
 //! cantilever: the longest beam that holds, against beam theory;
 //! compare [name]: scenes settled: what fell, at what cost;
-//! tree: a leaning tree cut deeper and deeper, does it fall.
+//! tree: a leaning tree cut deeper and deeper, does it fall;
+//! tower: a lattice tower, a leg cut, at every level;
+//! members: how much of their strength its members use, at every level.
 
 use statics::bodies::*;
 use statics::lattice::*;
@@ -182,6 +184,128 @@ fn main() {
         Some("cantilever") => exp_cantilever(),
         Some("compare") => exp_compare(args.next()),
         Some("tree") => exp_tree(),
-        _ => eprintln!("cantilever | compare [name] | tree"),
+        Some("tower") => exp_tower(),
+        Some("members") => exp_members(),
+        _ => eprintln!("cantilever | compare [name] | tree | tower"),
+    }
+}
+
+/// The distance from x to the segment a–b.
+fn to_segment(x: V3, a: V3, b: V3) -> f64 {
+    let ab = sub(b, a);
+    let t = (dot(sub(x, a), ab) / dot(ab, ab)).clamp(0.0, 1.0);
+    norm(sub(x, add(a, mul(ab, t))))
+}
+
+/// A lattice tower, legs from a square `base` wide to one `top` wide,
+/// `high`, rings every `panel` and crosses in every face between them,
+/// its members `thick` across, on four pads of steel; with `cut`, one leg
+/// gone from 1 m to 2.5 m. Nothing in it is held but what is deep in rock.
+fn tower(mat: Mat, cut: bool) -> Scene {
+    let (base, top, high, panel, thick) = (10.0, 2.0, 30.0, 3.0, 0.3);
+    let leg = move |k: usize, y: f64| {
+        let w = (base + (top - base) * y / high) / 2.0;
+        let (sx, sz) = [(1.0, 1.0), (-1.0, 1.0), (-1.0, -1.0), (1.0, -1.0)][k];
+        [sx * w, y, sz * w]
+    };
+    let mut members = Vec::new();
+    for k in 0..4 {
+        members.push((leg(k, -1.0), leg(k, high)));
+        let mut y = 0.0;
+        while y < high - 1e-9 {
+            let next = y + panel;
+            members.push((leg(k, next), leg((k + 1) % 4, next)));
+            members.push((leg(k, y), leg((k + 1) % 4, next)));
+            members.push((leg((k + 1) % 4, y), leg(k, next)));
+            y = next;
+        }
+    }
+    Scene {
+        name: format!("{} tower{}", mat.name, if cut { ", a leg cut" } else { "" }),
+        lo: [-base / 2.0 - 2.0, -2.5, -base / 2.0 - 2.0],
+        hi: [base / 2.0 + 2.0, high + 0.5, base / 2.0 + 2.0],
+        fill: Box::new(move |x: V3| {
+            for k in 0..4 {
+                let foot = leg(k, 0.0);
+                if inside(x[1], -2.5, 0.0) && (x[0] - foot[0]).abs() < 1.5 && (x[2] - foot[2]).abs() < 1.5 {
+                    return Some((STEEL, false));
+                }
+            }
+            let gone = cut && inside(x[1], 1.0, 2.5) && to_segment(x, leg(0, -1.0), leg(0, high)) < thick;
+            (!gone && members.iter().any(|(a, b)| to_segment(x, *a, *b) < thick / 2.0)).then_some((mat, false))
+        }),
+    }
+}
+
+/// Steel of 0.38 of its strength: where the tower stands whole, at
+/// level 0, and falls with a leg cut (see `members`).
+const WEAK_STEEL: Mat = Mat { name: "weak steel", rho: 7850.0, e: 200e9, g: 80e9, ft: 95e6, fc: 95e6, fs: 55e6 };
+
+fn exp_tower() {
+    println!("## A lattice tower: what falls of it, at level 0 and from its voxels gathered coarser");
+    for mat in [WEAK_STEEL] {
+        for cut in [false, true] {
+            let sc = tower(mat, cut);
+            let mut fine = sc.build(0);
+            hold_bulk(&mut fine, 0.75);
+            let free = fine.voxels.iter().filter(|v| !v.held).count();
+            let t = Instant::now();
+            let o = settle(&fine);
+            println!(
+                "{}: level 0, {free} free voxels: fallen {:5.1}%  rounds {}  {:.1}s",
+                sc.name,
+                100.0 * o.fallen,
+                o.rounds,
+                t.elapsed().as_secs_f64()
+            );
+            for level in 1..=4 {
+                let (coarse, left) = coarser(&fine, level);
+                let free = coarse.voxels.iter().filter(|v| !v.held).count();
+                let t = Instant::now();
+                let o = settle(&coarse);
+                println!(
+                    "{:>w$}  level {level} ({:.2} m), {free} free voxels, {:.1}% of bonds' area left out: fallen {:5.1}%  rounds {}  {:.2}s",
+                    "",
+                    spacing(level),
+                    100.0 * left,
+                    100.0 * o.fallen,
+                    o.rounds,
+                    t.elapsed().as_secs_f64(),
+                    w = sc.name.len()
+                );
+            }
+        }
+    }
+}
+
+/// How much of its strength the tower's members use, by height, at each
+/// level: intact and with a leg cut.
+fn exp_members() {
+    for cut in [false, true] {
+        let sc = tower(STEEL, cut);
+        let mut fine = sc.build(0);
+        hold_bulk(&mut fine, 0.75);
+        println!("## {}: the most of steel's strength used, by height (m)", sc.name);
+        println!("          {}", (0..10).map(|k| format!("{:>6}", format!("{}-{}", 3 * k, 3 * k + 3))).collect::<String>());
+        for level in 0..=4 {
+            let lat = if level == 0 { coarser(&fine, 0).0 } else { coarser(&fine, level).0 };
+            let alive = vec![true; lat.bonds.len()];
+            let gone = vec![false; lat.voxels.len()];
+            let f = forces(&lat, &alive, &gone, &mut Work(0.0));
+            let s = stresses(&lat, &f);
+            let mut band = [0.0f64; 10];
+            for (k, b) in lat.bonds.iter().enumerate() {
+                let ends: Vec<usize> = [b.i, b.j].into_iter().filter(|&v| !lat.voxels[v].held).collect();
+                if ends.is_empty() || b.p[1] < 0.0 {
+                    continue;
+                }
+                let mean: M3 =
+                    std::array::from_fn(|r| std::array::from_fn(|c| ends.iter().map(|&v| s[v][r][c]).sum::<f64>() / ends.len() as f64));
+                let u = b.mat.utilisation(&b.stress(&mean, f[k]));
+                let h = ((b.p[1] / 3.0) as usize).min(9);
+                band[h] = band[h].max(u);
+            }
+            println!("level {level}   {}", band.iter().map(|u| format!("{u:6.2}")).collect::<String>());
+        }
     }
 }

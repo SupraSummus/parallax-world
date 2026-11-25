@@ -290,7 +290,7 @@ pub fn forces(lattice: &Lattice, alive: &[bool], gone: &[bool], work: &mut Work)
     let voxel = part.clone();
     let mut levels = vec![Level::new(lattice, &part, count, &live)];
     let mut key = lattice.sites.clone();
-    let mut l = 0;
+    let mut l = lattice.level;
     while count > FEW {
         l += 1;
         for k in key.iter_mut() {
@@ -420,7 +420,7 @@ pub fn stresses(lattice: &Lattice, force: &[V3]) -> Vec<M3> {
             let r = sub(bond.p, lattice.voxels[v].x);
             for a in 0..3 {
                 for c in 0..3 {
-                    s[v][a][c] += (r[a] * on[c] + r[c] * on[a]) / (2.0 * lattice.volume);
+                    s[v][a][c] += (r[a] * on[c] + r[c] * on[a]) / (2.0 * lattice.voxels[v].volume);
                 }
             }
         }

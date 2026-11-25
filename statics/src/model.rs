@@ -56,6 +56,7 @@ pub const STONE: Mat = Mat { name: "stone", rho: 2500.0, e: 30e9, g: 12e9, ft: 5
 pub const WOOD: Mat = Mat { name: "wood", rho: 600.0, e: 10e9, g: 4e9, ft: 40e6, fc: 30e6, fs: 6e6 };
 pub const MASONRY: Mat = Mat { name: "masonry", rho: 2000.0, e: 5e9, g: 2e9, ft: 0.2e6, fc: 10e6, fs: 0.4e6 };
 pub const SOIL: Mat = Mat { name: "soil", rho: 1800.0, e: 50e6, g: 20e6, ft: 5e3, fc: 0.3e6, fs: 20e3 };
+pub const STEEL: Mat = Mat { name: "steel", rho: 7850.0, e: 200e9, g: 80e9, ft: 250e6, fc: 250e6, fs: 145e6 };
 pub const LEAVES: Mat = Mat { name: "leaves", rho: 60.0, e: 0.2e9, g: 0.08e9, ft: 5e6, fc: 5e6, fs: 1e6 };
 
 pub type M3 = [[f64; 3]; 3];
@@ -82,12 +83,14 @@ impl Mat {
     }
 }
 
-/// A voxel: where its centre is, what it weighs, whether it is held
-/// (ground that never moves).
+/// A voxel: where its matter's centre is, what it weighs, whether it is
+/// held (ground that never moves).
 #[derive(Clone, Debug)]
 pub struct Voxel {
     pub x: V3,
     pub m: f64,
+    /// The volume of the matter in it.
+    pub volume: f64,
     pub held: bool,
 }
 
