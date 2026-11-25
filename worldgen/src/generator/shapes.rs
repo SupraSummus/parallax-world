@@ -614,18 +614,19 @@ pub(super) fn draw_shape(shape: &Shape, seed: u64, si: i64, clip: &Box3, put: &m
  * they stop of a voxel otherwise empty. A carve frees those wholly in one,
  * of a voxel otherwise whole.
  */
-pub(super) fn slabs(across: bool, parts: &[(f64, f64)], carve: bool) -> f64 {
+pub(super) fn slabs(across: bool, parts: impl IntoIterator<Item = (f64, f64)>, carve: bool) -> f64 {
+    let within = within(across);
     if carve {
-        return parts.iter().map(|&(a, b)| within(across, a, b)).sum();
+        return parts.into_iter().map(|(a, b)| within(a, b)).sum();
     }
     // Chords wholly between the slabs or past them meet none.
     let mut at = -1.0;
     let mut free = 0.0;
-    for &(a, b) in parts {
-        free += within(across, at, a);
+    for (a, b) in parts {
+        free += within(at, a);
         at = f64::max(at, b);
     }
-    (1.0 - free - within(across, at, 1.0)).clamp(0.0, 1.0)
+    (1.0 - free - within(at, 1.0)).clamp(0.0, 1.0)
 }
 
 /**
@@ -655,10 +656,10 @@ type Chords = [Box<[[f32; CHORD_STEPS + 1]; CHORD_STEPS + 1]>; 2];
 /**
  * Of a voxel's chords along a face's direction, crossing planes across an
  * axis (`across`, as eight of the twelve do) or within one (the other
- * four): the share that lies wholly within [a, b), a slab of the voxel's
- * extent along the axis, from −1 to 1 (its sites' spacing).
+ * four): of [a, b), a slab of the voxel's extent along the axis, from
+ * −1 to 1 (its sites' spacing), the share that lies wholly within it.
  */
-fn within(across: bool, a: f64, b: f64) -> f64 {
+fn within(across: bool) -> impl Fn(f64, f64) -> f64 {
     static CHORDS: OnceLock<Chords> = OnceLock::new();
     let table = &CHORDS.get_or_init(|| [true, false].map(chords))[usize::from(!across)];
     let at = |v: f64| {
@@ -666,12 +667,14 @@ fn within(across: bool, a: f64, b: f64) -> f64 {
         let i = (t as usize).min(CHORD_STEPS - 1);
         (i, (t - i as f64) as f32)
     };
-    if b <= a {
-        return 0.0;
+    move |a, b| {
+        if b <= a {
+            return 0.0;
+        }
+        let ((i, u), (j, v)) = (at(a), at(b));
+        let row = |i: usize| table[i][j] * (1.0 - v) + table[i][j + 1] * v;
+        f64::from(row(i) * (1.0 - u) + row(i + 1) * u)
     }
-    let ((i, u), (j, v)) = (at(a), at(b));
-    let row = |i: usize| table[i][j] * (1.0 - v) + table[i][j + 1] * v;
-    f64::from(row(i) * (1.0 - u) + row(i + 1) * u)
 }
 
 /**

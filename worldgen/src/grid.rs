@@ -589,7 +589,7 @@ impl VoxelGrid {
     pub fn inside(&self, x: i64, y: i64, z: i64) -> Look {
         match self.slot(x, y, z) {
             Some(Ok(i)) => match self.pieces.get(i) {
-                pieces @ (0, _) => self.handed(i, pieces),
+                (0, _) => self.handed(i),
                 (alpha, colour) => look_of(colour, alpha),
             },
             _ => 0,
@@ -627,7 +627,7 @@ impl VoxelGrid {
         match self.slot(x, y, z) {
             // Only pieces can, so a medium's look, dear to make, isn't made.
             Some(Ok(i)) if self.pieces.get(i).0 > 0 => {
-                fcc::alpha_of(fcc::whole_or_none(self.handed(i, self.pieces.get(i)), x as i32, y as i32, z as i32)) == ALPHA
+                fcc::alpha_of(fcc::whole_or_none(self.handed(i), x as i32, y as i32, z as i32)) == ALPHA
             }
             _ => false,
         }
@@ -635,40 +635,17 @@ impl VoxelGrid {
 
     /** What site `i`'s pieces look like where whole (fcc's Look); else 0. */
     fn look(&self, i: usize) -> Look {
-        if self.whole(i) { self.handed(i, self.pieces.get(i)) } else { 0 }
+        if self.whole(i) { self.handed(i) } else { 0 }
     }
 
-    /**
-     * What hosts are handed of site `i` (fcc's Look), its pieces seen as
-     * `part`: whole, held in part or a medium, as much as it stops, in the
-     * colour of `part` and its medium of the rest. Its pieces as a whole
-     * give its own look; a face's part, its look through that face.
-     */
-    fn handed(&self, i: usize, part: Sight) -> Look {
-        match (self.pieces.get(i).0, self.stops(i)) {
-            (_, 0) => 0,
-            (ALPHA, _) => fcc::look(self.colour(i, part), ALPHA),
-            (pieces, alpha) => fcc::partial(self.colour(i, part), alpha, pieces > 0),
-        }
+    /** What site `i` is seen by: its pieces as a whole, and its medium. */
+    fn site(&self, i: usize) -> Site {
+        Site { pieces: self.pieces.get(i), medium: self.medium.get(i) }
     }
 
-    /** What site `i` stops of each channel of its rays, `pieces` of it and its medium of the rest, and what that shows (premultiplied, of COLOUR_ONE). */
-    fn seen(&self, i: usize, pieces: Sight) -> ([u8; 3], [u16; 3]) {
-        let ((pieces, p), (medium, m)) = self.with_medium(i, pieces);
-        (medium.map(|m| pieces + m), std::array::from_fn(|c| (p[c] + m[c]) as u16))
-    }
-
-    /** The colour site `i` shows, `pieces` of it and its medium of the rest (sRGB, unpremultiplied). */
-    fn colour(&self, i: usize, pieces: Sight) -> [u8; 3] {
-        let (stops, shows) = self.seen(i, pieces);
-        std::array::from_fn(|c| srgb(unpremultiplied(shows[c], stops[c])))
-    }
-
-    /** Of site `i`, pieces that stop `pieces` of its rays and show `colour`, and its medium of the rest: each how much it stops and shows. */
-    fn with_medium(&self, i: usize, (pieces, colour): (u8, [u16; 3])) -> (Stops<u8>, Stops<[u8; 3]>) {
-        let rest = |v: u32| ((ALPHA - pieces) as u64 * v as u64 + ALPHA as u64 / 2) / ALPHA as u64;
-        let (medium, of) = self.medium.get(i);
-        ((pieces, colour.map(u32::from)), (medium.map(|a| rest(a as u32) as u8), of.map(|c| rest(c as u32) as u32)))
+    /** What hosts are handed of site `i` as a whole (Site's `handed`). */
+    fn handed(&self, i: usize) -> Look {
+        self.site(i).handed(None)
     }
 
     /**
@@ -677,12 +654,7 @@ impl VoxelGrid {
      * checks' rays see it, not the mean of its walls and rooms.
      */
     fn view(&self, i: usize, kind: usize) -> Look {
-        self.handed(i, self.part(i, self.views.face(i, kind)))
-    }
-
-    /** Site `i`'s pieces along a face whose `sight` they have (`views`): what they stop of it and show (premultiplied), where they stop any of it, else as a whole. */
-    fn part(&self, i: usize, sight: Option<Sight>) -> Sight {
-        sight.filter(|sight| sight.0 > 0).unwrap_or_else(|| self.pieces.get(i))
+        self.site(i).handed(self.views.face(i, kind))
     }
 
     /**
@@ -783,12 +755,6 @@ impl VoxelGrid {
         self.glows.hold(&held);
     }
 
-    /** Of ALPHA, how much of its rays site `i` stops: its pieces, and its medium of the rest, in the channel it stops least. */
-    fn stops(&self, i: usize) -> u8 {
-        let (pieces, medium, all) = (self.pieces.get(i).0 as u32, least(self.medium.get(i).0) as u32, ALPHA as u32);
-        ((pieces * all + (all - pieces) * medium + all / 2) / all) as u8
-    }
-
     /**
      * How light entering site (x, y, z) by face `kind` sees it: what its
      * pieces stop of its rays and its medium of the rest, channel by
@@ -799,11 +765,12 @@ impl VoxelGrid {
     pub fn light(&self, x: i64, y: i64, z: i64, kind: usize) -> (Stops<u8>, Stops<[u8; 3]>, [u32; 3]) {
         match self.slot(x, y, z) {
             Some(Ok(i)) => {
+                let site = self.site(i);
                 let (pieces, glow) = match self.views.face(i, kind) {
                     Some(pieces) => (pieces, self.glows.get(i).map_or([0; 3], |g| g[kind])),
-                    None => (self.pieces.get(i), self.glow.get(i).copied().unwrap_or_default()),
+                    None => (site.pieces, self.glow.get(i).copied().unwrap_or_default()),
                 };
-                let (pieces, medium) = self.with_medium(i, pieces);
+                let (pieces, medium) = site.with_medium(pieces);
                 (pieces, medium, glow)
             }
             _ => ((0, [0; 3]), ([0; 3], [0; 3]), [0; 3]),
@@ -813,7 +780,7 @@ impl VoxelGrid {
     /** Of ALPHA, how much of the rays through site (x, y, z) it stops. */
     pub fn alpha(&self, x: i64, y: i64, z: i64) -> u8 {
         match self.slot(x, y, z) {
-            Some(Ok(i)) => self.stops(i),
+            Some(Ok(i)) => self.site(i).stops(),
             _ => 0,
         }
     }
@@ -826,7 +793,7 @@ impl VoxelGrid {
      * light: its bricks are kept too.
      */
     pub fn to_grid(&self) -> Grid {
-        let looks: Vec<Look> = (0..self.sites()).map(|i| self.handed(i, self.pieces.get(i))).collect();
+        let looks: Vec<Look> = (0..self.sites()).map(|i| self.handed(i)).collect();
         let keep: Vec<bool> = (0..self.sites() / BRICK_SITES)
             .map(|at| {
                 let sites = at * BRICK_SITES..(at + 1) * BRICK_SITES;
@@ -857,7 +824,8 @@ impl VoxelGrid {
         }
         // As `view` gives them, each sight once.
         let view = |(i, views): (usize, Faces<Sight>)| -> Option<[u32; VIEW_WORDS]> {
-            let (to, looks) = (to(i)?, views.map(|sight| self.handed(i, self.part(i, Some(sight)))));
+            let (to, site) = (to(i)?, self.site(i));
+            let looks = views.map(|sight| site.handed(Some(sight)));
             (looks.each().len() > 1).then(|| std::array::from_fn(|w| if w == 0 { to } else { looks.get(w - 1) }))
         };
         grid.views = sorted(self.views.iter().filter_map(view).collect());
@@ -865,7 +833,8 @@ impl VoxelGrid {
         // Of the bricks that hold a medium only: few do.
         let held = (0..self.sites() / BRICK_SITES).filter(|&at| self.medium.brick(at).is_some());
         let stops = |i: usize| {
-            let [r, g, b] = self.seen(i, self.pieces.get(i)).0;
+            let site = self.site(i);
+            let [r, g, b] = site.seen(site.pieces).0;
             (fcc::medium(looks[i]) && (r != g || g != b)).then(|| Some([to(i)?, fcc::look([r, g, b], 0)])).flatten()
         };
         let mut stops: Vec<[u32; 2]> = held.flat_map(|at| at * BRICK_SITES..(at + 1) * BRICK_SITES).filter_map(stops).collect();
@@ -877,6 +846,55 @@ impl VoxelGrid {
 
 /** What is seen of a site one way: how much it stops (of ALPHA) and what that shows (premultiplied, of COLOUR_ONE). */
 pub type Stops<A> = (A, [u32; 3]);
+
+/** What a site is seen by, read once: its pieces as a whole, and its medium (VoxelGrid's `pieces`, `medium`). */
+#[derive(Clone, Copy)]
+struct Site {
+    pieces: Sight,
+    medium: ([u8; 3], [u16; 3]),
+}
+
+impl Site {
+    /**
+     * What hosts are handed of it (fcc's Look), its pieces seen along a
+     * face as its `sight` there (`views`) where they stop any of it, else
+     * as a whole: whole, held in part or a medium, as much as it stops, in
+     * the colour of what its pieces show there and its medium of the rest.
+     */
+    fn handed(&self, sight: Option<Sight>) -> Look {
+        let colour = || self.colour(sight.filter(|sight| sight.0 > 0).unwrap_or(self.pieces));
+        match (self.pieces.0, self.stops()) {
+            (_, 0) => 0,
+            (ALPHA, _) => fcc::look(colour(), ALPHA),
+            (pieces, alpha) => fcc::partial(colour(), alpha, pieces > 0),
+        }
+    }
+
+    /** Of ALPHA, how much of its rays it stops: its pieces, and its medium of the rest, in the channel it stops least. */
+    fn stops(&self) -> u8 {
+        let (pieces, medium, all) = (self.pieces.0 as u32, least(self.medium.0) as u32, ALPHA as u32);
+        ((pieces * all + (all - pieces) * medium + all / 2) / all) as u8
+    }
+
+    /** What it stops of each channel of its rays, its pieces as `part` and its medium of the rest, and what that shows (premultiplied, of COLOUR_ONE). */
+    fn seen(&self, part: Sight) -> ([u8; 3], [u16; 3]) {
+        let ((pieces, p), (medium, m)) = self.with_medium(part);
+        (medium.map(|m| pieces + m), std::array::from_fn(|c| (p[c] + m[c]) as u16))
+    }
+
+    /** The colour it shows, its pieces as `part` and its medium of the rest (sRGB, unpremultiplied). */
+    fn colour(&self, part: Sight) -> [u8; 3] {
+        let (stops, shows) = self.seen(part);
+        std::array::from_fn(|c| srgb(unpremultiplied(shows[c], stops[c])))
+    }
+
+    /** Its pieces as a part that stops `pieces` of its rays and shows `colour`, and its medium of the rest: each how much it stops and shows. */
+    fn with_medium(&self, (pieces, colour): Sight) -> (Stops<u8>, Stops<[u8; 3]>) {
+        let rest = |v: u32| ((ALPHA - pieces) as u64 * v as u64 + ALPHA as u64 / 2) / ALPHA as u64;
+        let (medium, of) = self.medium;
+        ((pieces, colour.map(u32::from)), (medium.map(|a| rest(a as u32) as u8), of.map(|c| rest(c as u32) as u32)))
+    }
+}
 
 /** Of what a medium stops of each channel, the least: its alpha, to what takes one. */
 pub fn least(stops: [u8; 3]) -> u8 {

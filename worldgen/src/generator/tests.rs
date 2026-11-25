@@ -448,14 +448,14 @@ fn slabs_of_a_voxel_stop_the_chords_that_meet_them() {
     let near = |a: f64, b: f64| (a - b).abs() < 1e-3;
     for across in [true, false] {
         // All of it stops all; its halves, by symmetry, alike; a carve of both halves frees what lies wholly in either.
-        assert!(near(slabs(across, &[(-1.0, 1.0)], false), 1.0));
-        assert!(near(slabs(across, &[(-1.0, 0.0)], false), slabs(across, &[(0.0, 1.0)], false)));
-        assert!(near(slabs(across, &[(-1.0, 0.0), (0.0, 1.0)], true), 2.0 * slabs(across, &[(-1.0, 0.0)], true)));
+        assert!(near(slabs(across, [(-1.0, 1.0)], false), 1.0));
+        assert!(near(slabs(across, [(-1.0, 0.0)], false), slabs(across, [(0.0, 1.0)], false)));
+        assert!(near(slabs(across, [(-1.0, 0.0), (0.0, 1.0)], true), 2.0 * slabs(across, [(-1.0, 0.0)], true)));
     }
     // Chords along a plane across the axis lie at one height each, half of them below the middle; those crossing such
     // planes span heights, so a thin slab across the middle stops most of them and few of the others.
-    assert!(near(slabs(false, &[(-1.0, 0.0)], true), 0.5));
-    let thin = |across| slabs(across, &[(-0.1, 0.1)], false);
+    assert!(near(slabs(false, [(-1.0, 0.0)], true), 0.5));
+    let thin = |across| slabs(across, [(-0.1, 0.1)], false);
     assert!(thin(true) > 0.5 && thin(false) < 0.2, "{} across, {} along", thin(true), thin(false));
 }
 
