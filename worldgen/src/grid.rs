@@ -240,9 +240,10 @@ impl<A: Copy + Default + PartialEq> Part<A> {
         (self.alpha[at], self.colour[at]) = (alpha, colour);
     }
 
-    /** What the sites of the brick starting at `at` (in bricks) stop, if it holds any. */
-    fn brick(&self, at: usize) -> Option<&[A]> {
-        usize::try_from(self.at[at]).ok().map(|at| &self.alpha[at * BRICK_SITES..][..BRICK_SITES])
+    /** What the sites of the brick starting at `at` (in bricks) stop and show, if it holds any. */
+    fn brick(&self, at: usize) -> Option<(&[A], &[[u16; 3]])> {
+        let at = usize::try_from(self.at[at]).ok()? * BRICK_SITES;
+        Some((&self.alpha[at..][..BRICK_SITES], &self.colour[at..][..BRICK_SITES]))
     }
 
     /** Holds the sites of only the bricks `held` (VoxelGrid::hold), in that order, and of those only the ones that hold any. */
@@ -694,7 +695,9 @@ impl VoxelGrid {
         let whole: Vec<bool> = self
             .bricks
             .iter()
-            .map(|&at| usize::try_from(at).is_ok_and(|at| self.pieces.brick(at).is_some_and(|stops| stops.iter().all(|&a| a == ALPHA))))
+            .map(|&at| {
+                usize::try_from(at).is_ok_and(|at| self.pieces.brick(at).is_some_and(|(stops, _)| stops.iter().all(|&a| a == ALPHA)))
+            })
             .collect();
         let count = [self.bx, self.by, self.bricks.len() as i64 / (self.bx * self.by).max(1)];
         let buried = |brick: usize| {
@@ -792,13 +795,23 @@ impl VoxelGrid {
      * light: its bricks are kept too.
      */
     pub fn to_grid(&self) -> Grid {
-        let looks: Vec<Look> = (0..self.sites()).map(|i| self.handed(i)).collect();
-        let keep: Vec<bool> = (0..self.sites() / BRICK_SITES)
-            .map(|at| {
-                let sites = at * BRICK_SITES..(at + 1) * BRICK_SITES;
-                looks[sites].iter().any(|&c| c != 0) || self.glow.brick(at).next().is_some()
-            })
-            .collect();
+        // Brick by brick, its pieces and medium read once; a run of like sites (rock, a level's means, nothing) handed
+        // once. A brick is kept if any site shows or glows.
+        let mut looks: Vec<Look> = vec![0; self.sites()];
+        let mut keep = Vec::with_capacity(self.sites() / BRICK_SITES);
+        for (at, looks) in looks.chunks_exact_mut(BRICK_SITES).enumerate() {
+            let (pieces, medium) = (self.pieces.brick(at), self.medium.brick(at));
+            let mut last = (Site::default(), 0);
+            for (k, look) in looks.iter_mut().enumerate() {
+                let site = Site {
+                    pieces: pieces.map_or((0, [0; 3]), |(alpha, colour)| (alpha[k], colour[k])),
+                    medium: medium.map_or(([0; 3], [0; 3]), |(alpha, colour)| (alpha[k], colour[k])),
+                };
+                *look = if site == last.0 { last.1 } else { site.handed(None) };
+                last = (site, *look);
+            }
+            keep.push(looks.iter().any(|&c| c != 0) || self.glow.brick(at).next().is_some());
+        }
         let mut moved = vec![None; keep.len()];
         let mut grid = Grid::new(self.min.map(|v| v as i32), self.n.map(|v| v as i32), 0);
         for (place, &at) in self.bricks.iter().enumerate() {
@@ -836,9 +849,7 @@ impl VoxelGrid {
             let [r, g, b] = site.seen(site.pieces).0;
             (lattice::medium(looks[i]) && (r != g || g != b)).then(|| Some([to(i)?, lattice::look([r, g, b], 0)])).flatten()
         };
-        let mut stops: Vec<[u32; 2]> = held.flat_map(|at| at * BRICK_SITES..(at + 1) * BRICK_SITES).filter_map(stops).collect();
-        stops.sort_unstable_by_key(|w| w[0]);
-        grid.stops = stops.into_flattened();
+        grid.stops = sorted(held.flat_map(|at| at * BRICK_SITES..(at + 1) * BRICK_SITES).filter_map(stops).collect());
         grid
     }
 }
@@ -847,7 +858,7 @@ impl VoxelGrid {
 pub type Stops<A> = (A, [u32; 3]);
 
 /** What a site is seen by, read once: its pieces as a whole, and its medium (VoxelGrid's `pieces`, `medium`). */
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Default, PartialEq)]
 struct Site {
     pieces: Sight,
     medium: ([u8; 3], [u16; 3]),

@@ -331,7 +331,7 @@ impl Woods {
 
     /**
      * By species, the chance a square 2 m wide around column (x, z) holds a tree of it: none on rock, steep
-     * over the square at least, so the trees' points read the ground only at their leaves' corners.
+     * over the square at least, so the trees' points read the ground only at their leaves' sites.
      */
     fn leaf_chances(&self, x: i64, z: i64) -> [Fx; 3] {
         let c = self.column_over(x, z, sites::spacing().max(TREE_LEAF));

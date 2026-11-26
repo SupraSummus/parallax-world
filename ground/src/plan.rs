@@ -368,12 +368,16 @@ impl Plan<Fx> {
      * A smooth plan made only every `step` columns and interpolated
      * between: a band `step` or more wide costs a column a sample's share.
      * Sampling is what makes a coarse band of finer ones, so `make` may
-     * read finer plans; what it reads finer than `step` aliases.
+     * read finer plans; what it reads finer than `step` aliases. A
+     * sample is read at the middle of its cell, as a site is (worldgen's
+     * sites::middle): with `step` a level's spacing, where its sites read.
      */
     pub fn sampled(name: &'static str, scale: i64, step: i64, make: impl Fn(i64, i64) -> Fx + Send + Sync + 'static) -> Plan<Fx> {
-        let mut samples = Plan::new(name, scale, move |i, k| make(i * step, k * step));
+        let m = worldgen::sites::middle(step);
+        let mut samples = Plan::new(name, scale, move |i, k| make(i * step + m, k * step + m));
         samples.rule.filter = true;
         Plan::new(name, scale, move |x, z| {
+            let (x, z) = (x - m, z - m);
             let (i, k) = (x.div_euclid(step), z.div_euclid(step));
             let (u, v) = ((x.rem_euclid(step) << 16) / step, (z.rem_euclid(step) << 16) / step);
             let lerp = |a: Fixed, b: Fixed, t: Fixed| a + (((b - a) * t) >> 16);

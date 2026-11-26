@@ -3,8 +3,8 @@
 use std::collections::HashSet;
 
 use worldgen::generator::{Generator, generate, kind_of};
-use worldgen::grid::{Box3, VoxelGrid};
-use worldgen::units::UNIT_SIZE;
+use worldgen::grid::{ALPHA, Box3, VoxelGrid};
+use worldgen::units::{UNIT_SIZE, m};
 use worlds::forest::forest;
 
 /** 48 m × 80 m ahead of the spawn point, all heights, and the spawn point. */
@@ -86,14 +86,28 @@ fn a_body_walks_the_path_through_its_ferns() {
     let [x, z] = [world.spawn[0], world.spawn[2]].map(|v| v >> level);
     let (min_y, max_y) = world.heights_at(level);
     let area = Box3 { min: [2 * ((x - 32) / 2), min_y, z - 8], max: [x + 32, max_y, z + 128] };
-    let tiles = lattice::Tiles::one(generate(&world.generator, &area, level).to_grid());
+    let grid = generate(&world.generator, &area, level);
+    let tiles = lattice::Tiles::one(grid.to_grid());
     let ground = Ground { tiles: &tiles };
+    // The path winds, so the body walks it as one does: towards the middle of its columns 2 m ahead.
+    let kind = kind_of(&world.generator);
+    let path = |x: i64, z: i64| {
+        let top = (min_y..max_y).rev().find(|&y| grid.solid(x, y, z) > ALPHA / 2);
+        top.and_then(|y| kind(grid.inside(x, y, z))).is_some_and(|k| k.name == "path")
+    };
     let mut body = Walker::at(world.spawn.map(|v| v as f64));
-    let forward = WalkInput { forward: 1.0, ..WalkInput::default() };
+    let mut walked = 0.0;
     for _ in 0..6 * 60 {
-        body = body.walk(forward, 1.0 / 60.0, &ground);
+        let [x, _, z] = body.eye();
+        let row = (z as i64 + m(2.0)) >> level;
+        let across: Vec<f64> =
+            (area.min[0]..area.max[0]).filter(|&x| path(x, row)).map(|x| ((x << level) + (1 << level) / 2) as f64).collect();
+        let to = across.iter().sum::<f64>() / across.len() as f64;
+        let right = if across.is_empty() { 0.0 } else { ((to - x) / m(1.0) as f64).clamp(-1.0, 1.0) };
+        body = body.walk(WalkInput { forward: 1.0, right, ..WalkInput::default() }, 1.0 / 60.0, &ground);
+        let [nx, _, nz] = body.eye();
+        walked += (nx - x).hypot(nz - z) * UNIT_SIZE;
     }
     // At walking speed, 4.3 m/s, all the way: unstopped by the ferns by the path.
-    let walked = (body.eye()[2] - world.spawn[2] as f64) * UNIT_SIZE;
     assert!(walked > 25.0, "walked {walked:.1} m");
 }
