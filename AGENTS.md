@@ -64,7 +64,7 @@ worldgen/                    # The world-generation engine, no direction up in i
 │   ├── curve.rs             # Curves: lines through space
 │   ├── points.rs            # Points: where things are; rooms
 │   ├── frame.rs             # Things built in frames of their own
-│   ├── recent.rs            # What was used last, kept
+│   ├── recent.rs            # What was used last, kept; small values by slot, read without waiting
 │   ├── world.rs             # World: what a host needs to show one
 │   ├── entry.rs             # Entry: a world by name, what its checks hold it to; its tests (world_tests!)
 │   ├── tiles.rs             # A world's tiles, as hosts and light take them

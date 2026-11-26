@@ -231,7 +231,7 @@ fn shares(share: u32, faster: [f64; 3]) -> [u64; 3] {
  */
 fn pieces(grid: &mut VoxelGrid, added: &Added, i: usize) {
     // Alike through every face where it has no views, or no glows apart (VoxelGrid's `glows`).
-    let views = grid.views.get(i).unwrap_or(Faces::all(grid.pieces.get(i)));
+    let views = grid.views.get(i).unwrap_or_else(|| Faces::all(grid.pieces.get(i)));
     let glow = grid.glow.get(i).copied().unwrap_or_default();
     let glows = grid.glows.get(i).map_or(Faces::all(glow), |glows| Faces::by(|k| glows[k]));
     let after = views.zip_with(&glows, |s, g| (s, g)).zip_with(&added.faces, |(sight, glow), face| added.to(sight, glow, face));
