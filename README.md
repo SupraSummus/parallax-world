@@ -1,11 +1,9 @@
 # Parallax Voxel Engine
 
-Voxel worlds of rhombic dodecahedra on the face-centred cubic lattice,
+Voxel worlds of cubes, their levels of detail an octree,
 generated in pieces at any level of detail,
 and a frontend that draws them (`native/`, wgpu),
-in a window or a browser:
-by rays through the voxels,
-or by cells of the lattice baked into chunks, drawn in relief.
+in a window or a browser, by rays through the voxels.
 
 ![Autumn forest by the railway, mist lying among the trunks over heather](docs/shots/forest-fog.webp "--camera -2231,139,13027 --look -142,1 --distance 40000 --light 4,1,0")
 
@@ -42,17 +40,17 @@ We take the first way.
 What the design is held to, beyond speed:
 
 1. **Structure comes from the lattice, not the screen.**
-   Chunks and every other partition follow the FCC lattice,
-   and their boundaries run between voxels.
+   Every partition follows the lattice,
+   and its boundaries run between voxels.
    A rectangle of pixels imposed from outside is a foreign element.
 2. **Self-similarity.**
-   Every coarser level is again an FCC lattice of rhombic dodecahedra:
+   Every coarser level is again cubes, each the eight finer in it:
    the same rule and the same geometry at every scale,
    with no special case for coarser levels.
-3. **Isotropy over convenience.**
-   No direction is preferred:
-   the world must look the same along each of the 12 directions.
-   This outranks nesting (a tree of cells) and ease of implementation.
+3. **Directions are measured.**
+   Cubes prefer the axes;
+   the checks hold how much a world's look follows them
+   ([docs/checks.md](docs/checks.md)).
 4. **Elegance is a criterion in its own right.**
    Results should be visible, not only measured.
    A fix that needs more special cases is a sign to step back.
@@ -62,27 +60,26 @@ What the design is held to, beyond speed:
 Fidelity is perceptual, not geometric:
 the engine simplifies what a viewer won't notice
 and bounds, as an angle on screen, how far the rest can be off
-(section 2 of [docs/architecture.md](docs/architecture.md),
+([docs/architecture.md](docs/architecture.md),
 where the sections below are too).
 Moving makes only what comes into view,
 and once a view is complete nothing is drawn till the camera moves.
 
-1. **Rhombic dodecahedra on the FCC lattice.**
-   A voxel meets its 12 nearest neighbours face to face, all equally far,
-   and walls and floors along the axes stay flat (section 5).
-   Each face may show a colour of its own,
-   and the 12 faces are the 12 directions chunks are seen along.
-2. **One hierarchy of cells for everything.**
-   The cells of N·FCC, N = 1, 2, 4, …,
-   shape chunks,
-   levels of detail, and where generators place things (section 1).
-3. **Rays across the lattice, or chunks named by it.**
+1. **Cubes.**
+   A voxel meets its 6 neighbours face to face,
+   and walls and floors along the axes stay flat (section 4).
+   Each face may show a colour of its own.
+2. **One octree for everything.**
+   Levels of detail, the light's levels
+   and the cells rays cross empty space by
+   are cubes of 2^ℓ·Z³, each the eight finer in it (section 1).
+3. **Rays across the lattice.**
    A ray goes from voxel to voxel across their faces,
-   through each level of detail as far as it is held, then the next coarser.
-   Or cells along 12 directions are baked as seen along their direction,
-   each voxel at its depth, named by the lattice, not the camera,
-   so a chunk, once baked, stays valid wherever the camera goes,
-   and is drawn in relief (sections 3–4).
+   through each level of detail as far as it is held, then the next coarser
+   (section 2).
+   Or, the flat engine (`--engine flat`): cells of the octree baked once
+   into pictures, each seen along one of the cube's 18 axes and diagonals
+   (section 3).
 4. **Worlds generated in pieces, at any level of detail.**
    A world of `worlds/` on the generator framework of `worldgen/`
    (the forest, and the valley: the forest with a town and fields)
@@ -108,7 +105,7 @@ Controls: W/S forward/back, A/D left/right, Space/Shift up/down, arrow
 keys or drag to look around.
 
 In a browser with WebGPU it is the same code in WebAssembly,
-by the voxels engine, on threads sharing its memory;
+on threads sharing its memory;
 that takes Node, pnpm and the nightly Rust `pnpm wasm` names besides,
 with its source and WebAssembly target:
 

@@ -3,7 +3,7 @@
 //! voxels' tiles give them. At an edge, the picture, made of fewer rays,
 //! may show the voxel beside the one told of.
 
-use fcc::{ALPHA, FACE_KINDS, in_part};
+use lattice::{ALPHA, FACE_KINDS, in_part};
 use worldgen::units::UNIT_SIZE;
 
 use crate::engine::voxels::Probe;
@@ -73,7 +73,7 @@ fn three(v: [f32; 3]) -> String {
     v.map(|v| if v == 0.0 || v.abs() >= 1e-3 { format!("{v:.3}") } else { format!("{v:.1e}") }).join(" ")
 }
 
-/** A look: its colour, and what it is of (fcc's Look). */
+/** A look: its colour, and what it is of (lattice's Look). */
 fn described(look: u32) -> String {
     let [r, g, b, alpha] = look.to_le_bytes();
     let of = match alpha {

@@ -10,9 +10,8 @@ use crate::engine::{Painter, Picture};
 
 /**
  * The backend engines draw with: on DX12, wgpu's indirect draws counted on
- * the GPU leave their first instance out of the instance index, which
- * carries the tile, and their first vertex out of the vertex index, which
- * carries a flat picture's cluster (chunks' compositor.rs).
+ * the GPU leave their first vertex out of the vertex index, which carries
+ * a flat picture's cluster (chunks' compositor.rs).
  */
 #[cfg(not(target_arch = "wasm32"))]
 const BACKENDS: wgpu::Backends = wgpu::Backends::VULKAN;
@@ -33,14 +32,10 @@ pub fn instance() -> wgpu::Instance {
 
 /**
  * What the chunks' compositor needs of a device: draws listed on the GPU,
- * a tile or a flat picture's runs each; depth tested before tiles' pixels
- * march, though they write it (compositor.wgsl); and flat pictures cut
- * to their faces' rays.
+ * a flat picture's runs each, and the pictures cut to their faces' rays
+ * (compositor.wgsl).
  */
-pub const FEATURES: wgpu::Features = wgpu::Features::INDIRECT_FIRST_INSTANCE
-    .union(wgpu::Features::MULTI_DRAW_INDIRECT_COUNT)
-    .union(wgpu::Features::SHADER_EARLY_DEPTH_TEST)
-    .union(wgpu::Features::CLIP_DISTANCES);
+pub const FEATURES: wgpu::Features = wgpu::Features::MULTI_DRAW_INDIRECT_COUNT.union(wgpu::Features::CLIP_DISTANCES);
 
 /**
  * FEATURES, as a device of `adapter` is asked for them: all, but in a

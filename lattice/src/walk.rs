@@ -3,7 +3,7 @@
 //! from) what is low enough as it walks, and jumps.
 //! Lattice units throughout, 0.125 m (worldgen's UNIT_SIZE).
 
-use crate::{Tiles, VOXEL_FACES};
+use crate::Tiles;
 
 /** Lattice units per metre. */
 const M: f64 = 8.0;
@@ -36,7 +36,7 @@ pub trait Solid {
 }
 
 /**
- * The voxels of COLLISION_LEVEL's tiles that stop a walking body (fcc's
+ * The voxels of COLLISION_LEVEL's tiles that stop a walking body (lattice's
  * Grid::solid). Sites no tile has a grid for are solid: the body stops
  * there rather than fall.
  */
@@ -176,28 +176,13 @@ impl Walker {
     }
 }
 
-/**
- * Whether the body with its feet at `feet` overlaps a solid voxel. Two
- * convex shapes are apart if and only if they are along one of their
- * faces' normals or their edges' cross products: for the body, a box, and
- * a voxel, the box's axes and the voxel's normals (VOXEL_FACES), along
- * each of which the voxel reaches 1 from its site.
- */
+/** Whether the body, a box, with its feet at `feet` overlaps a solid voxel: a cube `scale()` a side. */
 fn blocked(ground: &impl Solid, feet: [f64; 3]) -> bool {
-    const AXES: [[i32; 3]; 3] = [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
     let scale = ground.scale();
-    let centre = [feet[0], feet[1] + HEIGHT / 2.0, feet[2]].map(|v| v / scale);
-    let half = [HALF_WIDTH, HEIGHT / 2.0, HALF_WIDTH].map(|v| v / scale);
-    let range = |i: usize| (centre[i] - half[i] - 1.0).floor() as i32..=(centre[i] + half[i] + 1.0).ceil() as i32;
-    let sites = range(0).flat_map(|x| range(1).flat_map(move |y| range(2).map(move |z| [x, y, z])));
-    sites.filter(|[x, y, z]| (x + y + z) & 1 == 0).any(|site| {
-        let apart = AXES.iter().chain(&VOXEL_FACES).any(|n| {
-            let along: f64 = (0..3).map(|i| f64::from(n[i]) * (f64::from(site[i]) - centre[i])).sum();
-            let reach: f64 = (0..3).map(|i| f64::from(n[i].abs()) * half[i]).sum();
-            along.abs() >= 1.0 + reach
-        });
-        !apart && ground.solid(site)
-    })
+    let (lo, hi) = ([feet[0] - HALF_WIDTH, feet[1], feet[2] - HALF_WIDTH], [feet[0] + HALF_WIDTH, feet[1] + HEIGHT, feet[2] + HALF_WIDTH]);
+    // The sites whose cubes [p, p + 1) · scale meet the box, open at its sides.
+    let range = |i: usize| (lo[i] / scale).floor() as i32..(hi[i] / scale).ceil() as i32;
+    range(0).any(|x| range(1).any(|y| range(2).any(|z| ground.solid([x, y, z]))))
 }
 
 /** Moves `feet` by `d` along `axis` as far as nothing blocks it, to within a 64th; returns whether something did. */
@@ -224,7 +209,7 @@ fn shift(ground: &impl Solid, feet: &mut [f64; 3], axis: usize, d: f64) -> bool 
 mod tests {
     use super::*;
 
-    /** Voxels 2 units apart: a floor, its top's tips at y = 0, and those at sites in boxes [min, max) on it. */
+    /** Cubes 2 units a side: a floor, its top at y = 0, and those at sites in boxes [min, max) on it. */
     struct Scene(&'static [([f64; 3], [f64; 3])]);
 
     impl Solid for Scene {
@@ -262,8 +247,7 @@ mod tests {
     }
 
     #[test]
-    fn keeps_its_feet_on_the_tips_of_the_floor_wherever_it_stands_and_walks() {
-        // The floor's top is its voxels' tips, the body always over some: the feet are at their height.
+    fn keeps_its_feet_on_the_floor_wherever_it_stands_and_walks() {
         let ground = Scene(&[]);
         for (x, yaw) in [(0.0, 0.0), (0.5, 30.0), (1.0, 45.0), (1.5, 90.0)] {
             let mut body = run(&ground, Walker::at([x, 24.0 + EYE_HEIGHT, 0.7]), STILL, 2.0);

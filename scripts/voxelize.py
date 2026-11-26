@@ -1,4 +1,4 @@
-"""A glTF scene as voxels of the FCC lattice at level 0, for worlds/src/scene.rs.
+"""A glTF scene as cubes of level 0, for worlds/src/scene.rs.
 
     python3 scripts/voxelize.py SCENE.gltf OUT.bin [--scale METRES_PER_UNIT]
 
@@ -211,15 +211,8 @@ class Sites:
 
 
 def nearest_sites(p):
-    """The FCC sites (x + y + z even) nearest to points p, lattice units."""
-    r = np.rint(p)
-    odd = (r.sum(axis=1).astype(np.int64) & 1) == 1
-    # An odd point is moved along the axis it is furthest from, towards p.
-    off = p[odd] - r[odd]
-    axis = np.abs(off).argmax(axis=1)
-    rows = np.nonzero(odd)[0]
-    r[rows, axis] += np.where(off[np.arange(len(rows)), axis] >= 0, 1, -1)
-    return r.astype(np.int64)
+    """The sites whose cubes, [site, site + 1), hold points p, lattice units."""
+    return np.floor(p).astype(np.int64)
 
 
 def main():
@@ -252,12 +245,8 @@ def main():
 
     sites, mean = sites.result()
     lo = sites.min(axis=0)
-    # Keep the lattice: the origin moves by an even amount on each axis.
-    lo -= lo & 1
     sites -= lo
     n = sites.max(axis=0) + 1
-    # An even width: each row of the box (along x) has n[0] / 2 sites.
-    n[0] += n[0] & 1
     srgb = (np.clip(linear_to_srgb(mean), 0, 1) * 255 + 0.5).astype(np.uint8)
     print(f'{len(sites)} sites in {n.tolist()}', file=sys.stderr)
 
@@ -266,7 +255,7 @@ def main():
     ids = np.asarray(quantized, np.uint8).reshape(-1).astype(np.int64) + 1
     palette = np.array(quantized.getpalette()[:3 * (ids.max())], np.uint8)
 
-    out = bytearray(b'FCC0')
+    out = bytearray(b'CUB0')
     out += struct.pack('<I', len(palette) // 3) + palette.tobytes()
     out += struct.pack('<6i', *[int(v) for v in lo], *[int(v) for v in n])
 
@@ -277,7 +266,7 @@ def main():
         out.append(v)
 
     # Sites in order z, y, x, as runs: a run of empty sites, then of full ones, each a varint, the full ones' ids after.
-    rank = (sites[:, 2] * n[1] + sites[:, 1]) * (n[0] // 2) + sites[:, 0] // 2
+    rank = (sites[:, 2] * n[1] + sites[:, 1]) * n[0] + sites[:, 0]
     order = np.argsort(rank)
     rank, ids = rank[order], ids[order].astype(np.uint8)
     starts = np.flatnonzero(np.diff(rank, prepend=-2) != 1)
@@ -289,7 +278,7 @@ def main():
         out += ids[start:end].tobytes()
         at = rank[end - 1] + 1
     # The last run has no full sites: the end.
-    varint(int(n[0] // 2 * n[1] * n[2] - at))
+    varint(int(n[0] * n[1] * n[2] - at))
     varint(0)
     Path(args.out).write_bytes(out)
     print(f'{len(palette) // 3} colours, {len(out)} bytes', file=sys.stderr)

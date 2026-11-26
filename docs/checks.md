@@ -94,7 +94,7 @@ a box generated in parts is the box generated whole.
 What a layer says of itself holds:
 what it skips, where it is whole, its things' reach, the world's heights.
 And a coarse site stands for finer ones:
-each level's cells look, along each of the lattice's 12 directions,
+each level's cells look, along each of the lattice's 6 directions,
 as what is in them does the level two finer (`checks::cells`; "Levels" in generators.md).
 Not what a ray through many cells sees:
 that differs by what is inherent to seeing each cell as a whole.
@@ -156,8 +156,8 @@ a coarse site's colour its kinds' mean shades;
 so a coarse level may draw one kind for another,
 as the moor's heather for its sprigs, if it looks alike.
 Hosts take what a site's pieces look like, through each face where it differs:
-whole where they stop every ray, else held in part (fcc's `in_part`),
-shown by coins as often as they stop rays (architecture.md, section 4).
+whole where they stop every ray, else held in part (lattice's `in_part`),
+shown by coins as often as they stop rays (architecture.md, section 2).
 What stops a walking body is apart from how a site looks:
 the share of its rays what stops one stops, wherever in it (`VoxelGrid`'s `solid`);
 a host's site stops a body where that is over half.
@@ -186,7 +186,7 @@ at each level of a region generated once (`hold_region`):
 - at each level up to the world's, against the level two finer,
   a sample of cells near a surface in each stratum's places in each region
   (`checks::cells`), the region grown by a site of the level, and to at least 16 across,
-  each along each of the 12 directions, inside it only;
+  each along each of the 6 directions, inside it only;
 - at each level up to one past the world's, over the region
   (and once a world, a host tile's width around spawn),
   a slab above the world's `heights`, if it has them, stops no rays at all:

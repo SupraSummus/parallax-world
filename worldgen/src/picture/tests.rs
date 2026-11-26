@@ -1,6 +1,6 @@
 use super::*;
 use crate::generator::{ANY_SIZE, KindDef, Layer, Node, Op, Population, SOLID, ball};
-use fcc::light::linear_to_srgb;
+use lattice::light::linear_to_srgb;
 
 /** A ball of radius 40 at the origin, on the corner of four tiles. */
 fn a_ball() -> Generator {
@@ -24,21 +24,17 @@ fn a_ray_sees_a_voxel_along_its_direction_wherever_it_enters() {
     grid.put_whole(0, 0, 0, std::array::from_fn(|k| [white(k); 3]));
     let seen = |origin: [f64; 3], direction: [f64; 3]| {
         let direction = normalize(direction);
-        fcc::ray::first_hit(origin, direction, 8.0, |[x, y, z]| grid.get(x, y, z) != 0)
+        lattice::ray::first_hit(origin, direction, 8.0, |[x, y, z]| grid.get(x, y, z) != 0)
             .map(|(_, [x, y, z], face)| (grid.along(x, y, z, direction) & 255, FACES[face][1]))
     };
     assert_eq!(seen([0.1, 3.0, 0.2], [0.0, -1.0, 0.0]), Some((255, 1)));
-    // Along +x, by its four faces towards −x, one of them up: a quarter of it.
+    // Along +x, by its face towards −x.
+    assert_eq!(seen([-3.0, 0.1, 0.2], [1.0, 0.0, 0.0]), Some((0, 0)));
+    // A little down, it enters by its face up and sees it by the face turned most against it, towards −x.
+    assert_eq!(seen([-3.0, 2.3, 0.5], [1.0, -0.4, 0.0]), Some((0, 1)));
+    // Down along a diagonal, by two faces alike, as much of each.
     let srgb = |linear: f32| (255.0 * linear_to_srgb(linear)).round() as u32;
-    assert_eq!(seen([-3.0, 0.1, 0.2], [1.0, 0.0, 0.0]), Some((srgb(0.25), 0)));
-    // A little down, it enters by a face down and sees it by the face turned most against it, up.
-    assert_eq!(seen([-3.0, -0.2, 0.1], [1.0, -0.1, 0.0]), Some((255, -1)));
-    // Straight down onto a ridge of two faces up, as much of each.
-    let mut ridge = VoxelGrid::new(&Box3 { min: [-4; 3], max: [4; 3] });
-    let half = |k: usize| if FACES[k] == [1, 1, 0] || FACES[k] == [0, 1, 1] { COLOUR_ONE } else { 0 };
-    ridge.put_whole(0, 0, 0, std::array::from_fn(|k| [half(k); 3]));
-    let grey = ridge.along(0, 0, 0, [0.0, -1.0, 0.0]) & 255;
-    assert_eq!(grey, srgb(0.5));
+    assert_eq!(grid.along(0, 0, 0, [1.0, -1.0, 0.0]) & 255, srgb(0.5));
 }
 
 #[test]
@@ -54,7 +50,7 @@ fn a_ray_cut_in_two_stops_what_it_stops_whole() {
     let (origin, direction) = ([-3.1, -2.3, -1.7], normalize([0.8, 0.5, 0.3]));
     let through = |from: f64, to: f64| {
         let start = [0, 1, 2].map(|i| origin[i] + from * direction[i]);
-        1.0 - composited(&grid, start, direction, to - from, 1.0).iter().map(|(_, seen)| seen.stopped).sum::<f64>()
+        1.0 - composited(&grid, start, direction, to - from).iter().map(|(_, seen)| seen.stopped).sum::<f64>()
     };
     for cut in [0.3, 1.1, 2.5, 3.7, 4.9] {
         let (whole, parts) = (through(0.0, 6.0), through(0.0, cut) * through(cut, 6.0));

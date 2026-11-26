@@ -1,15 +1,15 @@
 //! A reference for `Light`, for tests: the light on a voxel's face found
-//! by following random rays through the voxels of level 0 (fcc's ray.rs),
-//! bounce after bounce till chance ends them, with none of Light's shortcuts (its 12 directions,
+//! by following random rays through the voxels of level 0 (lattice's ray.rs),
+//! bounce after bounce till chance ends them, with none of Light's shortcuts (its 18 directions,
 //! its levels). Voxels are opaque and reflect evenly (Lambert); the sky is as
 //! bright everywhere above the horizon; the sun is a direction, as bright
-//! as Light's sun in its one of the 12 (which stands for a twelfth of the
-//! sphere, π/3). The ground goes on past the box: rays that leave it
+//! as Light's sun in its one of the 18 (a face weighs each direction by
+//! its cosine over their sum, 1 + 2√2). The ground goes on past the box: rays that leave it
 //! downwards are taken to meet nothing, which is close enough near the
 //! ground.
 
 use super::{ALPHA, Brightness, GLOW, GLOW_ONE, Rgb, SKY, SUN, SUN_DIRECTION};
-use fcc::ray::{FACES, first_hit};
+use lattice::ray::{FACES, first_hit};
 use worldgen::World;
 use worldgen::generator::generate;
 use worldgen::grid::{Box3, COLOUR_ONE, VoxelGrid};
@@ -40,7 +40,7 @@ impl Reference {
             grid: generate(&world.generator, &BOX, 0),
             glow: GLOW * brightness.glow / GLOW_ONE as f32,
             sky: SKY.map(|c| c * brightness.sky),
-            sun: SUN.map(|c| c * brightness.sun / 3.0),
+            sun: SUN.map(|c| c * brightness.sun / (1.0 + 2.0 * std::f32::consts::SQRT_2)),
             sun_direction,
         }
     }
@@ -78,7 +78,7 @@ impl Reference {
         let ((alpha, colour), _, glow) = self.grid.light(x, y, z, face);
         debug_assert_eq!(alpha, ALPHA, "voxels of the reference's scenes are whole");
         let normal = normalize(FACES[face].map(|v| v as f64));
-        let point = add(rhombus(site, face, random), normal.map(|c| c * OFF));
+        let point = add(on_square(site, face, random), normal.map(|c| c * OFF));
         // The sun, if it reaches the point, and one direction's light, as often as its cosine.
         let cosine = dot(normal, self.sun_direction);
         let sun = if cosine > 0.0 && self.hit(point, self.sun_direction).is_none() { cosine as f32 } else { 0.0 };
@@ -113,21 +113,10 @@ impl Reference {
     }
 }
 
-/** A random point of face `face` of the voxel at `site`: a rhombus whose corners are the voxel's corners on that face's plane. */
-fn rhombus(site: [i64; 3], face: usize, random: &mut Random) -> [f64; 3] {
-    let f = FACES[face].map(|v| v as f64);
-    let [i, j] = [0, 1, 2].map(|k| f[k] != 0.0).iter().enumerate().filter(|(_, n)| **n).map(|(k, _)| k).collect::<Vec<_>>()[..] else {
-        unreachable!("a face's normal has two coordinates")
-    };
-    let k = 3 - i - j;
-    // From the face's middle, towards its corners on the axes (along ±(f_i, −f_j)) and off them (along ±k): |u| + |v| ≤ 1.
-    let (s, t) = (random.next(), random.next());
-    let (u, v) = (s + t - 1.0, s - t);
-    let mut p = site.map(|c| c as f64);
-    p[i] += f[i] / 2.0 + u * f[i] / 2.0;
-    p[j] += f[j] / 2.0 - u * f[j] / 2.0;
-    p[k] += v / 2.0;
-    p
+/** A random point of face `face` of the voxel at `site`, the cube [site, site + 1): a unit square. */
+fn on_square(site: [i64; 3], face: usize, random: &mut Random) -> [f64; 3] {
+    let axis = face / 2;
+    std::array::from_fn(|k| site[k] as f64 + if k == axis { (face & 1) as f64 } else { random.next() })
 }
 
 /** A random direction about `normal`, as often as its cosine with it. */

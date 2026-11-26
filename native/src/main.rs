@@ -22,7 +22,7 @@ use std::sync::Arc;
 use web_time::Instant;
 
 use clap::{Parser, ValueEnum};
-use fcc::walk::{COLLISION_LEVEL, Ground, WalkInput, Walker};
+use lattice::walk::{COLLISION_LEVEL, Ground, WalkInput, Walker};
 
 use engine::voxels::{Marcher, Probe};
 use engine::{Colours, Engine, Frame, Kind, Look, Picture};
@@ -86,7 +86,7 @@ struct Args {
     #[arg(long, help_heading = "Engine")]
     unhidden: bool,
 
-    /** Walks on the ground (fcc's walk.rs), as F does, rather than flying. */
+    /** Walks on the ground (lattice's walk.rs), as F does, rather than flying. */
     #[arg(long, help_heading = "Steering")]
     walk: bool,
     /** How fast it flies to begin with, in units a second, as the panel's slider. */
@@ -238,7 +238,7 @@ struct View {
     tolerance: f32,
     /** Units a second the camera flies at (walking keeps walk.rs's own). */
     speed: f64,
-    /** Walking on the ground (fcc's walk.rs): the body the camera is the eye of; None flying. */
+    /** Walking on the ground (lattice's walk.rs): the body the camera is the eye of; None flying. */
     walker: Option<Walker>,
     /** Whether the window tells of the voxel under the pointer (inspect.rs), as the voxels engine finds it. */
     inspecting: bool,

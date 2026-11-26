@@ -1,6 +1,6 @@
-rock rock	1	0.080	0.129
-rock rock	2	0.081	0.130
-rock rock	3	0.089	0.134
-tunnels carving	1	0.107	0.175
-tunnels carving	2	0.111	0.176
-tunnels carving	3	0.101	0.163
+rock rock	1	0.017	0.144
+rock rock	2	0.055	0.135
+rock rock	3	0.109	0.145
+tunnels carving	1	0.070	0.219
+tunnels carving	2	0.138	0.197
+tunnels carving	3	0.118	0.161

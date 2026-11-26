@@ -16,9 +16,10 @@ use crate::sites::spacing;
 
 /**
  * A span `length` long as it stays at every level: at least two spacings
- * of the sites read for, as a line of sites along an axis has a site every
- * two (generator.rs, Span). Grown away from the end that shows: a layer
- * from its top, a medium standing free from what it stands on.
+ * of the sites read for, so that a site of the line is whole in it however
+ * its ends fall across the sites (generator.rs, Span). Grown away from the
+ * end that shows: a layer from its top, a medium standing free from what
+ * it stands on.
  */
 pub fn thick(length: i64) -> i64 {
     length.max(2 * spacing())

@@ -3,13 +3,10 @@ use crate::noise::fx;
 
 #[test]
 fn the_sites_around_a_point_keep_its_place() {
-    // On a site, between two, in a tetrahedron's middle, in an octahedron's, and anywhere.
-    for p in [[2.0, 1.0, -1.0], [0.5, 0.5, 0.0], [0.5, 0.5, 0.5], [1.0, 0.0, 0.0], [0.3, 1.9, -0.6], [-2.25, 0.75, 7.5]] {
+    // On a site, between two, four and eight, and anywhere.
+    for p in [[2.0, 1.0, -1.0], [0.5, 0.5, 0.0], [0.5, 0.5, 0.5], [1.0, 0.5, 0.0], [0.3, 1.9, -0.6], [-2.25, 0.75, 7.5]] {
         let around = shapes::around(p);
-        assert!(
-            around.iter().all(|(site, near)| (site[0] + site[1] + site[2]) & 1 == 0 && (0.0..=1.0).contains(near)),
-            "{p:?}: {around:?}"
-        );
+        assert!(around.iter().all(|(_, near)| (0.0..=1.0).contains(near)), "{p:?}: {around:?}");
         let centre: [f64; 3] = std::array::from_fn(|a| around.iter().map(|(site, near)| near * site[a] as f64).sum());
         let all: f64 = around.iter().map(|(_, near)| near).sum();
         assert!((all - 1.0).abs() < 1e-12 && (0..3).all(|a| (centre[a] - p[a]).abs() < 1e-12), "{p:?}: {around:?}");
@@ -80,59 +77,18 @@ fn a_measured_far_form_keeps_what_rays_see() {
     // Over these 16 blocks, 0.79 from above.
     assert!(from_above > 0.65, "rays from above see the glass on top {from_above} of the time");
     assert!(from_the_side < 0.1, "rays from the side see the glass {from_the_side} of the time");
-    // A sparse cloud's shares of its about 134 cells (a ball's volume over a site's, 2 · 16³) add up to about a
-    // quarter of them, each cloud's within a cell or two of that: it is not kept or dropped whole. Its fine
-    // sites, each kept with a chance of 1 − 0.98⁴, stop 0.27 of the rays along an axis through a cell inside
-    // it, traced through their voxels; counted by columns, not pairs, a sixth of them were kept.
+    // A sparse cloud's shares of its about 268 cells (a ball's volume over a site's, 16³) add up to what a ray along
+    // an axis through a cell inside it is stopped by, each cloud's within a few cells of that: it is not kept or
+    // dropped whole. Its fine sites, each kept with a chance of 1 − 0.98⁴, stop 0.27 of those rays.
     let cloud = || Node { far: Some(Far::measured(fx(2.0))), ..Node::of(vec![ball([0.0; 3], 64.0, 1, Fill::Const(0.02), Op::Fill)]) };
     let kept: Vec<f64> = on_threads(16, |i| {
         let cloud = cloud();
         let sites = measure(&cloud, &format!("cloud {i}"), "clouds", bounds_of(&cloud), fixed(2.0), 16, 1, &Measured::default());
         sites.iter().map(|s| s.4 as f64 / SHARE as f64).sum()
     });
-    assert!(kept.iter().all(|n| (26.0..38.0).contains(n)), "sparse clouds keep {kept:?} of their about 134 cells");
+    assert!(kept.iter().all(|n| (62.0..82.0).contains(n)), "sparse clouds keep {kept:?} of their about 268 cells");
 }
 
-#[test]
-fn a_cells_pairs_of_columns_are_counted() {
-    // Every fine site near a few cells of a level, assigned to its nearest: each cell's columns holding one,
-    // per axis, and the pairs of neighbours either of which does, as pairs_of_cell counts them for any cell.
-    for r in [2i64, 4, 8, 16] {
-        for centre in [[0, 0, 0], [1, 1, 0], [-1, 0, 1], [0, 2, 0], [3, -1, 2]] {
-            let mut columns: [std::collections::HashSet<(i64, i64)>; 3] = Default::default();
-            let c = centre.map(|v| v * r);
-            for x in c[0] - r..=c[0] + r {
-                for y in c[1] - r..=c[1] + r {
-                    for z in c[2] - r..=c[2] + r {
-                        if (x + y + z) & 1 == 0 && nearest_site([x, y, z].map(|v| v * ONE), r) == centre {
-                            columns[0].insert((y, z));
-                            columns[1].insert((z, x));
-                            columns[2].insert((x, y));
-                        }
-                    }
-                }
-            }
-            let pairs = columns.map(|held| {
-                let mut pairs = std::collections::HashSet::new();
-                for &(i, j) in &held {
-                    for (u, v) in [(i - 1, j), (i + 1, j), (i, j - 1), (i, j + 1)] {
-                        pairs.insert(if (i, j) < (u, v) { ((i, j), (u, v)) } else { ((u, v), (i, j)) });
-                    }
-                }
-                pairs.len() as u32
-            });
-            assert_eq!(pairs, pairs_of_cell(r), "cells {r} sites wide, at {centre:?}");
-        }
-        println!("{r}: {:?} halves of a column, of a shadow of {}", pairs_of_cell(r), 4 * r * r);
-    }
-}
-
-/**
- * Levels of detail by construction: at sites s apart, a tube holds
- * what is within its radius of the curve, give or take s / 2, as the
- * curve is drawn through the points of a level it strays from by
- * no more.
- */
 #[test]
 fn a_tube_is_within_half_a_site_of_its_curve() {
     let curve = Curve::wandering(3, [8.0, 4.0, 2.0, 1.0].map(fx).to_vec());
@@ -188,17 +144,18 @@ fn a_sheet_is_its_middle_on_the_planes_of_sites_within_half_a_site() {
 
 #[test]
 fn a_gable_narrows_to_its_ridge() {
-    // 8 wide across x, 4 high: at height h, the sites within 4 · (1 − h / 4) of x = 4.
+    // 8 wide across x, 4 high: at height h, the cubes whose middles are within 4 · (1 − h / 4) of x = 4.
+    let middle = |site: [i64; 3]| site.map(|v| v * ONE + ONE / 2);
     let shape = gable([0.0; 3], [8.0, 4.0, 6.0], 2, [0, 1, 0], 1, SOLID, Op::Fill);
     let inside = shape.inside(0, 1);
-    let holds = |x: i64, y: i64| inside.holds([x, y, 2].map(|v| v * ONE));
+    let holds = |x: i64, y: i64| inside.holds(middle([x, y, 2]));
     assert!(holds(0, 0) && holds(7, 0) && holds(4, 3) && holds(3, 2) && holds(6, 1));
     assert!(!holds(1, 3) && !holds(8, 0) && !holds(4, 4) && !holds(7, 2));
     // Standing along −x, its ridge along y, it holds the same points turned (off its ends, which a box rounds one way).
     let turned = gable([-4.0, 0.0, 0.0], [0.0, 6.0, 8.0], 1, [-1, 0, 0], 1, SOLID, Op::Fill);
     let inside = turned.inside(0, 1);
     for (x, y) in (-1..9).flat_map(|x| (1..4).map(move |y| (x, y))) {
-        assert_eq!(inside.holds([-y, 2, x].map(|v| v * ONE)), holds(x, y), "({x}, {y})");
+        assert_eq!(inside.holds(middle([-y - 1, 2, x])), holds(x, y), "({x}, {y})");
     }
 }
 
@@ -278,7 +235,7 @@ fn a_field_says_where_it_is_along_any_axis() {
             }
             // All buried, it is made as one brick, every site of it whole.
             let buried = generate_shown(&world, &behind, level, 1);
-            assert_eq!(buried.sites(), (BRICK * BRICK * BRICK / 2) as usize);
+            assert_eq!(buried.sites(), (BRICK * BRICK * BRICK) as usize);
             assert!(buried.bricks.iter().all(|&at| at == 0) && buried.pieces.alpha.iter().all(|&a| a == ALPHA));
         }
     }
@@ -316,7 +273,7 @@ fn a_tile_holds_its_ground_by_its_surface_not_its_volume() {
         for (up, t) in (0..3).flat_map(|up| [64, 256].map(|t| (up, t))) {
             let world = solid_ground(up, height);
             let b = standing_box(up, Box3 { min: [0, -64, 0], max: [t, g * t + 64, t] });
-            let sites = (BRICK * BRICK * BRICK / 2) as usize;
+            let sites = (BRICK * BRICK * BRICK) as usize;
             let column = |grid: VoxelGrid| (grid.sites() / sites - 1) as f64 / (t * t / BRICK / BRICK) as f64;
             let held = column(generate_shown(&world, &b, 0, up));
             assert!(held <= 2.5 + 2.0 * g as f64, "up {up}, rising {g} a column, a tile {t} sites a side holds {held} bricks a column");
@@ -335,7 +292,7 @@ fn what_hosts_make_of_a_box_differs_from_all_of_it_only_in_buried_rock() {
         let (all, made) = (generate(&world, &b, level), generate_shown(&world, &b, level, up));
         let whole = |grid: &VoxelGrid, [x, y, z]: [i64; 3]| grid.alpha(x, y, z) == ALPHA;
         let sites = (b.min[2]..b.max[2]).flat_map(|z| (b.min[1]..b.max[1]).flat_map(move |y| (b.min[0]..b.max[0]).map(move |x| [x, y, z])));
-        for [x, y, z] in sites.filter(|&[x, y, z]| crate::grid::is_site(x, y, z)) {
+        for [x, y, z] in sites {
             let light = |grid: &VoxelGrid| std::array::from_fn::<_, FACE_KINDS, _>(|k| grid.light(x, y, z, k));
             let look = |grid: &VoxelGrid| (grid.get(x, y, z), grid.solid(x, y, z), light(grid));
             let around = VOXEL_FACES.map(|[i, j, k]| [x + i as i64, y + j as i64, z + k as i64]);
@@ -412,7 +369,7 @@ fn a_thing_is_known_by_its_anchor_and_number_there_whichever_box_asks() {
 #[test]
 fn a_spans_face_is_where_it_is_at_every_level() {
     // Ground up to y = h, on a plane of sites or off it. Along the plane, a line's sites stop as much of their rays as
-    // ground up to h holds of their voxels, a site standing for two spacings of its line: on average over the lines.
+    // ground up to h holds of their voxels, a site standing for a spacing of its line: on average over the lines.
     let kinds = vec![KindDef { name: "stone", kind_type: 1, colors: &["#808080"], walk_through: false, glows: false, medium: false }];
     let along = (0..FACE_KINDS).find(|&k| VOXEL_FACES[k][1] == 0).expect("a face along the plane");
     for h in [0, 3, -7] {
@@ -431,10 +388,9 @@ fn a_spans_face_is_where_it_is_at_every_level() {
             let stopped = |x: i64, y: i64, z: i64| grid.light(x, y, z, along).0.0 as f64 / ALPHA as f64;
             let lines = (0..32).flat_map(|x| (0..32).map(move |z| (x, z)));
             let tops = lines.map(|(x, z)| {
-                let sites = (b.min[1]..b.max[1]).filter(|y| (x + y + z) & 1 == 0);
-                // The lowest site's voxel starts a spacing under it.
-                let bottom = (b.min[1] + ((b.min[1] + x + z) & 1) - 1) * s;
-                bottom as f64 + sites.map(|y| stopped(x, y, z)).sum::<f64>() * 2.0 * s as f64
+                // The lowest site's voxel, a cube, starts at it.
+                let bottom = b.min[1] * s;
+                bottom as f64 + (b.min[1]..b.max[1]).map(|y| stopped(x, y, z)).sum::<f64>() * s as f64
             });
             let mean = tops.sum::<f64>() / (32.0 * 32.0);
             assert!((mean - h as f64).abs() <= s as f64 / 16.0, "level {level}: ground up to {h} has its top at {mean} on average");
@@ -451,22 +407,23 @@ fn slabs_of_a_voxel_stop_the_chords_that_meet_them() {
         assert!(near(slabs(across, [(-1.0, 0.0)], false), slabs(across, [(0.0, 1.0)], false)));
         assert!(near(slabs(across, [(-1.0, 0.0), (0.0, 1.0)], true), 2.0 * slabs(across, [(-1.0, 0.0)], true)));
     }
-    // Chords along a plane across the axis lie at one height each, half of them below the middle; those crossing such
-    // planes span heights, so a thin slab across the middle stops most of them and few of the others.
+    // Chords along a plane across the axis lie at one height each, half of them below the middle; those along the axis
+    // cross every height, so a thin slab across the middle stops all of them and few of the others.
     assert!(near(slabs(false, [(-1.0, 0.0)], true), 0.5));
     let thin = |across| slabs(across, [(-0.1, 0.1)], false);
     assert!(thin(true) > 0.5 && thin(false) < 0.2, "{} across, {} along", thin(true), thin(false));
 }
 
 #[test]
-fn slabs_that_share_a_voxel_out_share_out_its_mean_chord() {
+fn slabs_that_share_a_voxel_out_share_out_its_chord() {
     // However it is cut across an axis, what its rays along the axis run in its slabs adds up to their whole way:
     // so a medium is as dense along a ray whatever sites its span is cut by.
     for cuts in [vec![-1.0, 1.0], vec![-1.0, 0.0, 1.0], vec![-1.0, -0.9, -0.3, 0.05, 0.6, 1.0]] {
         let run: f64 = cuts.windows(2).map(|cut| crossed(cut[0], cut[1])).map(|(share, length)| share * length).sum();
         assert!((run - 1.0).abs() < 1e-9, "{cuts:?}: {run}");
     }
-    // A thin slab is crossed by all of them across the middle, where each runs its height in it, and by few at a tip.
-    let ((middle, height), (tip, _)) = (crossed(-0.05, 0.05), crossed(0.9, 1.0));
-    assert!((middle - 1.0).abs() < 1e-9 && (height - 0.1).abs() < 0.01 && tip < 0.05, "{middle} {height} {tip}");
+    // A thin slab is crossed by all of them, anywhere, each as far as the slab is high.
+    for (share, length) in [crossed(-0.05, 0.05), crossed(0.9, 1.0)] {
+        assert!(share == 1.0 && (length - 0.05).abs() < 1e-9, "{share} {length}");
+    }
 }

@@ -42,6 +42,20 @@ pub fn spacing() -> i64 {
     FOOTPRINT.get().map_or(1, |(spacing, _)| spacing)
 }
 
+/**
+ * Where lines of sites `spacing` apart read, lattice units on from
+ * `spacing` · site: the level-0 site under their cubes' middle, so that a
+ * coarser site stands for the finer ones in its cube (an octree), and
+ * level 1 reads one of its eight. Level 0 reads its cube [site, site + 1)
+ * at its least corner, so the middle of what it reads in a coarser cube
+ * is half a unit under the cube's: a coarser level is half a unit lower
+ * still, which matters less the coarser it is. Shapes, in fixed point,
+ * read each cube at its middle (draw_shape).
+ */
+pub fn middle(spacing: i64) -> i64 {
+    (spacing - 1) / 2
+}
+
 /** Runs `read` with plans read where asked, whoever asks: as a plan's columns are made, and points' chances (points.rs). */
 pub fn where_asked<R>(read: impl FnOnce() -> R) -> R {
     let outer = FOOTPRINT.take();

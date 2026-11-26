@@ -60,7 +60,7 @@ fn label3_of_class(class: u8) -> u16 {
     }
 }
 
-/** Bumped whenever world_box or world_lattice draws differently, so that what they cached is drawn again. */
+/** Bumped whenever world_box draws differently, so that what they cached is drawn again. */
 const CACHE_VERSION: u32 = 1;
 
 /** The volume cached at `path` (with CACHE_VERSION), or `make`'s, cached there. */
@@ -116,9 +116,7 @@ pub fn world_box(world: &World, (x0, z0): (i64, i64), n: [usize; 3], cache: &str
                             min[1] + 2 * y as i64 + ((d >> 1) & 1),
                             min[2] + 2 * z as i64 + ((d >> 2) & 1),
                         ];
-                        if worldgen::grid::is_site(p[0], p[1], p[2]) {
-                            count[material(grid.get(p[0], p[1], p[2])) as usize] += 1;
-                        }
+                        count[material(grid.get(p[0], p[1], p[2])) as usize] += 1;
                     }
                     let best = (1..LABELS3.len()).max_by_key(|l| (count[*l], std::cmp::Reverse(*l))).filter(|l| count[*l] > 0);
                     whole.set([x, y, z], best.map_or(AIR, |l| l as u16));
@@ -138,65 +136,6 @@ pub fn world_box(world: &World, (x0, z0): (i64, i64), n: [usize; 3], cache: &str
         let y0 = ground.saturating_sub(12).min(tall[1] - n[1]);
         whole.crop([0, y0, 0], n)
     })
-}
-
-/**
- * A box of `world` on its own lattice at level 3 (sites a metre apart):
- * the points [0, e] on each axis from (x0, z0) metres (both even) and from
- * 12 m under its ground up (the median of its sites' topmost ground,
- * rock, street or field), labels at sites only (masked_fcc.rs's volumes).
- * Cached under `cache` (see `cached`).
- */
-pub fn world_lattice(world: &World, (x0, z0): (i64, i64), e: [usize; 3], cache: &str) -> Vol {
-    let n = e.map(|v| v + 1);
-    cached(&format!("{cache}-{x0}-{z0}"), n, || {
-        assert!(x0 % 2 == 0 && z0 % 2 == 0, "even corners keep sites sites");
-        let material = materials(world);
-        let (lo, hi) = world.heights_at(3);
-        let lo = lo.div_euclid(2) * 2;
-        let tall = [n[0], (hi - lo) as usize, n[2]];
-        let b = Box3 { min: [x0, lo, z0], max: [x0 + n[0] as i64, hi, z0 + n[2] as i64] };
-        let grid = generate(&world.generator, &b, 3);
-        let mut whole = Vol::filled(tall, AIR);
-        for y in 0..tall[1] {
-            for z in 0..tall[2] {
-                for x in 0..tall[0] {
-                    let p = [x0 + x as i64, lo + y as i64, z0 + z as i64];
-                    if worldgen::grid::is_site(p[0], p[1], p[2]) {
-                        whole.set([x, y, z], material(grid.get(p[0], p[1], p[2])));
-                    }
-                }
-            }
-        }
-        let mut tops: Vec<usize> = Vec::new();
-        for z in 0..n[2] {
-            for x in 0..n[0] {
-                if let Some(y) = (0..tall[1]).rev().find(|y| matches!(whole.at([x, *y, z]), 1 | 2 | 8 | 10)) {
-                    tops.push(y);
-                }
-            }
-        }
-        tops.sort_unstable();
-        let ground = tops.get(tops.len() / 2).copied().unwrap_or(tall[1] / 2);
-        // An even start, so the box's sites are the world's.
-        let y0 = (ground.saturating_sub(12).min(tall[1] - n[1])) / 2 * 2;
-        whole.crop([0, y0, 0], n)
-    })
-}
-
-/** A volume's labels at sites of the lattice only (x + y + z even), 0 elsewhere. */
-pub fn on_lattice(v: &Vol) -> Vol {
-    let mut out = v.clone();
-    for y in 0..v.n[1] {
-        for z in 0..v.n[2] {
-            for x in 0..v.n[0] {
-                if (x + y + z) % 2 == 1 {
-                    out.set([x, y, z], AIR);
-                }
-            }
-        }
-    }
-    out
 }
 
 /** A lattice volume as a dense one to look at: each point not a site takes the site above it (below, at the top). */
@@ -577,56 +516,4 @@ pub fn villages_flat(train: usize, held: usize) -> (Vec<Vol>, Vec<Vol>) {
     let learn = (0..train as u64).map(|s| Vol::of_image(&village(s))).collect();
     let out = (0..held as u64).map(|s| Vol::of_image(&village(10_000 + s))).collect();
     (learn, out)
-}
-
-/**
- * The scenes on the lattice at level 3 (sites a metre apart), as
- * masked_fcc.rs takes them: the forest and a town from worldgen, caves
- * and islands drawn here; volumes to learn from, and held out.
- */
-pub fn lattice(name: &str) -> (Vec<Vol>, Vec<Vol>) {
-    const BOX: [usize; 3] = [96, 48, 96];
-    const TALL: [usize; 3] = [96, 64, 96];
-    let dir = format!("{}/masked_fcc", crate::OUT);
-    let corner = |h: u64, spread: u64| ((h % spread) as i64 - spread as i64 / 2).div_euclid(32) * 32;
-    match name {
-        "forest" => {
-            let world = worlds::forest::forest(1);
-            let boxes = |seeds: std::ops::Range<u64>| -> Vec<Vol> {
-                seeds
-                    .map(|s| {
-                        let h = hash64(s, 0, 0, 5);
-                        world_lattice(&world, (corner(h, 1600), corner(h >> 20, 1600)), BOX, &format!("{dir}/forest-{s}"))
-                    })
-                    .collect()
-            };
-            (boxes(0..12), boxes(100..102))
-        }
-        "town" => {
-            let boxes = |seeds: &[u64]| -> Vec<Vol> {
-                seeds
-                    .iter()
-                    .map(|s| {
-                        let world = worlds::valley::valley(*s);
-                        let t = valley::towns(*s);
-                        let unit = worldgen::units::m(1.0);
-                        let town = t.near(0).expect("a town");
-                        let h = hash64(*s, 0, 0, 6);
-                        let (x, z) = (town.x / unit - 48 + corner(h, 100), town.z / unit - 48 + corner(h >> 20, 100));
-                        world_lattice(&world, (x.div_euclid(32) * 32, z.div_euclid(32) * 32), BOX, &format!("{dir}/town-{s}"))
-                    })
-                    .collect()
-            };
-            (boxes(&(1..=12).collect::<Vec<_>>()), boxes(&[19, 20]))
-        }
-        "caves" => {
-            let make = |s: u64| on_lattice(&caves(s, TALL.map(|v| v + 1)));
-            ((0..24).map(make).collect(), (100..104).map(make).collect())
-        }
-        "islands" => {
-            let make = |s: u64| on_lattice(&islands(s, TALL.map(|v| v + 1)));
-            ((0..24).map(make).collect(), (100..104).map(make).collect())
-        }
-        _ => panic!("no scene {name}"),
-    }
 }

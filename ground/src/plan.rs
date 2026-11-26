@@ -281,14 +281,15 @@ impl Sloped {
 
     /**
      * The plan at column (x, z) on the sites read for now (`spacing`):
-     * between their columns, interpolated from the four around. So a
-     * layer composes only its own columns, and its things stand on the
-     * ground it draws. Where asked (plans, points), the column itself.
+     * between the columns they read (worldgen's sites::middle),
+     * interpolated from the four around. So a layer composes only its own
+     * columns, and its things stand on the ground it draws. Where asked
+     * (plans, points), the column itself.
      */
     #[inline]
     pub fn at(&self, x: i64, z: i64) -> i64 {
-        let s = spacing();
-        let (u, v) = (x & (s - 1), z & (s - 1));
+        let (s, m) = (spacing(), worldgen::sites::middle(spacing()));
+        let (u, v) = ((x - m) & (s - 1), (z - m) & (s - 1));
         if u | v == 0 {
             return self.exact(x, z);
         }
@@ -333,15 +334,17 @@ impl Sloped {
      */
     pub fn range(&self, min: [i64; 2], max: [i64; 2]) -> Option<(i64, i64)> {
         let (slope, s) = (self.slope?, spacing());
+        let m = worldgen::sites::middle(s);
         let key = [min[0], min[1], max[0], max[1], s];
         if let Some((_, range)) = self.last.lock().expect("ranges").iter().find(|(k, _)| *k == key) {
             return Some(*range);
         }
         // Samples every `step` columns, a power of two and at least a spacing, from below min to past max: on one grid
         // for any rectangle, so rectangles side by side share theirs (the plan keeps them), and among the columns `at`
-        // reads. One of those is at most step / 2 from a sample along each axis, unless each is one.
+        // reads (`m` on from a spacing's multiple). One of those is at most step / 2 from a sample along each axis,
+        // unless each is one.
         let step = [0, 1].map(|a| (((max[a] - min[a]) / SAMPLES).max(s) as u64).next_power_of_two() as i64);
-        let along = |a: usize| (min[a].div_euclid(step[a])..=-(-max[a]).div_euclid(step[a])).map(move |i| i * step[a]);
+        let along = |a: usize| ((min[a] - m).div_euclid(step[a])..=-(m - max[a]).div_euclid(step[a])).map(move |i| i * step[a] + m);
         let (mut lo, mut hi) = (i64::MAX, i64::MIN);
         for x in along(0) {
             for z in along(1) {
@@ -683,7 +686,7 @@ mod tests {
         let apart = |w: i64, h: i64, s: i64| {
             (1 - w..w).all(|dx| (1 - h..h).all(|dz| (dx, dz) == (0, 0) || (sum(dx * s, dz * s) as i64).unsigned_abs() >> SHIFT > 0))
         };
-        // A host's tile of 128 by 128 sites, at each level it draws (fcc's GRID_LEVELS).
+        // A host's tile of 128 by 128 sites, at each level it draws (lattice's GRID_LEVELS).
         for level in 0..9 {
             assert!(apart(128, 128, 1 << level), "a tile at level {level}");
         }

@@ -3,7 +3,7 @@
 use std::collections::HashSet;
 
 use worldgen::generator::{Generator, generate, kind_of};
-use worldgen::grid::{Box3, VoxelGrid, is_site};
+use worldgen::grid::{Box3, VoxelGrid};
 use worldgen::units::UNIT_SIZE;
 use worlds::forest::forest;
 
@@ -26,14 +26,12 @@ fn voxels(grid: &VoxelGrid, generator: &Generator) -> Vec<(i64, i64, i64, u8)> {
     let (kind, mut all) = (kind_of(generator), Vec::new());
     for z in z0..z0 + nz {
         for y in y0..y0 + ny {
-            let mut x = x0 + ((x0 + y + z) & 1);
-            while x < x0 + nx {
+            for x in x0..x0 + nx {
                 let look = grid.get(x, y, z);
                 if look != 0 {
                     // A mix of kinds is of none.
                     all.push((x, y, z, kind(look).map_or(0, |k| k.kind_type)));
                 }
-                x += 2;
             }
         }
     }
@@ -58,15 +56,15 @@ fn forest_is_deterministic_has_ground_trees_and_a_clear_spawn() {
     let columns: HashSet<(i64, i64)> = all.iter().map(|&(x, _, z, _)| (x, z)).collect();
     assert_eq!(columns.len() as f64, (48.0 / UNIT_SIZE) * (80.0 / UNIT_SIZE));
 
-    // Trees between 10 m and 25 m tall: the longest vertical run of wood in any column (its sites are every other y).
+    // Trees between 10 m and 25 m tall: the longest vertical run of wood in any column.
     let mut wood: Vec<(i64, i64, i64)> = all.iter().filter(|v| v.3 == 4).map(|&(x, y, z, _)| (x, z, y)).collect();
     wood.sort();
     let (mut longest, mut run) = (0, 0);
     for (i, &(x, z, y)) in wood.iter().enumerate() {
-        run = if i > 0 && wood[i - 1] == (x, z, y - 2) { run + 1 } else { 1 };
+        run = if i > 0 && wood[i - 1] == (x, z, y - 1) { run + 1 } else { 1 };
         longest = longest.max(run);
     }
-    let tallest = 2.0 * longest as f64 * UNIT_SIZE;
+    let tallest = longest as f64 * UNIT_SIZE;
     assert!(tallest > 10.0 && tallest < 25.0, "tallest run of wood {tallest} m");
 
     // The camera starts in open air with a clear view 4 m ahead.
@@ -74,9 +72,7 @@ fn forest_is_deterministic_has_ground_trees_and_a_clear_spawn() {
     for dz in 0..(4.0 / UNIT_SIZE) as i64 {
         for dx in -1..=1 {
             for dy in -1..=1 {
-                if is_site(sx + dx, sy + dy, sz + dz) {
-                    assert_eq!(grid.get(sx + dx, sy + dy, sz + dz), 0, "a voxel at ({}, {}, {})", sx + dx, sy + dy, sz + dz);
-                }
+                assert_eq!(grid.get(sx + dx, sy + dy, sz + dz), 0, "a voxel at ({}, {}, {})", sx + dx, sy + dy, sz + dz);
             }
         }
     }
@@ -84,13 +80,13 @@ fn forest_is_deterministic_has_ground_trees_and_a_clear_spawn() {
 
 #[test]
 fn a_body_walks_the_path_through_its_ferns() {
-    use fcc::walk::{COLLISION_LEVEL, Ground, WalkInput, Walker};
+    use lattice::walk::{COLLISION_LEVEL, Ground, WalkInput, Walker};
     let world = forest(7);
     let level = COLLISION_LEVEL;
     let [x, z] = [world.spawn[0], world.spawn[2]].map(|v| v >> level);
     let (min_y, max_y) = world.heights_at(level);
     let area = Box3 { min: [2 * ((x - 32) / 2), min_y, z - 8], max: [x + 32, max_y, z + 128] };
-    let tiles = fcc::Tiles::one(generate(&world.generator, &area, level).to_grid());
+    let tiles = lattice::Tiles::one(generate(&world.generator, &area, level).to_grid());
     let ground = Ground { tiles: &tiles };
     let mut body = Walker::at(world.spawn.map(|v| v as f64));
     let forward = WalkInput { forward: 1.0, ..WalkInput::default() };

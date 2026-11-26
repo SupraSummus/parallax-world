@@ -19,12 +19,11 @@
 //! from, the forest where a rule is texture.
 //!
 //! One learner of any scene, flat or 3D: a pyramid of learned codes, each
-//! level drawn from the one above by a small local network (masked.rs;
-//! masked_fcc.rs on the worlds' FCC lattice, where coarse cells overlap).
+//! level drawn from the one above by a small local network (masked.rs).
 //! It learns statistics and new layouts, but breaks long thin things
 //! (lanes, tunnels) into pieces. The scenes are in scenes.rs.
 //!
-//! Drawing addresses instead of labels (exemplar.rs, exemplar_fcc.rs):
+//! Drawing addresses instead of labels (exemplar.rs):
 //! each cell points into an example, so whole pieces come through. It
 //! keeps lanes whole and islands apart, but cuts houses and street grids
 //! where pieces of two towns meet.
@@ -62,20 +61,17 @@
 //! barely help.
 //!
 //! The examples run the experiments (`cargo run --release --example
-//! gather`, then `shared` and `export`; `masked`, `masked_fcc`;
-//! `exemplar`, `exemplar_fcc`; `critic`; scripts/overture.py, then
+//! gather`, then `shared` and `export`; `masked`; `exemplar`; `critic`;
+//! scripts/overture.py, then
 //! `blend`), print Markdown tables and write pictures to out/; the
 //! worlds' columns are generated once and cached there.
 
 pub mod critic;
 pub mod exemplar;
-pub mod exemplar_fcc;
-pub mod fcc_stats;
 pub mod geometry;
 pub mod grammar;
 pub mod image;
 pub mod masked;
-pub mod masked_fcc;
 pub mod net;
 pub mod plan;
 pub mod profile;

@@ -8,7 +8,7 @@
 //! for world (by name, as in worlds::all), seed, level, the area's min x and z, width and depth (lattice
 //! units), and the file.
 
-use fcc::light::{linear_to_srgb, srgb_to_linear};
+use lattice::light::{linear_to_srgb, srgb_to_linear};
 use worldgen::generator::generate;
 use worldgen::grid::{Box3, VOXEL_FACES};
 use worlds::{all, by_name};
@@ -33,7 +33,7 @@ fn main() {
     let (x0, z0, nx, nz) = (2 * (number(3) / s).div_euclid(2), number(4) / s, number(5) / s, number(6) / s);
     let (min_y, max_y) = world.heights_at(level);
     let mut image = vec![0u8; (nx * nz * 3) as usize];
-    // A ray straight down sees a voxel through its four faces up alike (fcc's `facing`): their mean.
+    // A ray straight down sees a voxel through its four faces up alike (lattice's `facing`): their mean.
     let up: Vec<usize> = (0..VOXEL_FACES.len()).filter(|&k| VOXEL_FACES[k][1] > 0).collect();
     // In tiles, as hosts generate it.
     const TILE: i64 = 64;
@@ -43,7 +43,7 @@ fn main() {
             let grid = generate(generator, &b, level);
             for z in b.min[2]..b.max[2].min(z0 + nz) {
                 for x in b.min[0]..b.max[0].min(x0 + nx) {
-                    let Some(y) = (min_y..max_y).rev().filter(|y| (x + y + z) & 1 == 0).find(|&y| grid.get(x, y, z) != 0) else {
+                    let Some(y) = (min_y..max_y).rev().find(|&y| grid.get(x, y, z) != 0) else {
                         continue;
                     };
                     let light = 0.75 + 0.25 * (y - min_y) as f64 / (max_y - min_y) as f64;

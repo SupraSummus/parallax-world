@@ -8,7 +8,7 @@ Entry point for AI agents working on this codebase. Read this first.
 |----------|---------|-----------|
 | [README.md](README.md) | Overview and quick start | First |
 | [docs/worlds.md](docs/worlds.md) | The worlds: what is in them and how they are seen | Adding or changing what one sees or does |
-| [docs/architecture.md](docs/architecture.md) | Cells, chunks, compositing and the voxels engine; the crates | Touching the Rust |
+| [docs/architecture.md](docs/architecture.md) | Levels and tiles, the voxels and flat engines, the lattice; the crates | Touching the Rust |
 | [docs/testing.md](docs/testing.md) | Test layout and conventions | Writing tests |
 | [docs/todo.md](docs/todo.md) | Planned work: known problems and open ideas | Looking for what to do next |
 | [docs/generators.md](docs/generators.md) | Generating worlds in pieces: layers, things, rules | Writing or changing a world generator |
@@ -41,19 +41,16 @@ web/                         # The frontend in a browser
 Cargo.toml                   # The Rust crates' workspace; lab/ a member, not a default one
 .cargo/config.toml           # Builds for x86-64-v3, and WebAssembly with threads (see there)
 scripts/voxelize.py          # A glTF scene as voxels, for worlds/src/scene.rs
-fcc/src/                     # The FCC lattice and its voxels as every crate sees them (no dependencies)
-├── lib.rs                   # Faces, lattices, levels, Grid, tiles
+lattice/src/                 # The cubic lattice and its voxels as every crate sees them (no dependencies)
+├── lib.rs                   # Faces, levels, Grid, tiles
 ├── light.rs                 # The light from voxels' faces, as hosts hand it over
 ├── ray.rs                   # Rays across the voxels, exactly, face to face
 └── walk.rs                  # A body that falls, collides, steps and jumps
-bake/src/                    # Chunk baker, on fcc/
-├── lib.rs                   # Baker: one chunk per call
-├── cells.rs                 # Cells of the coarser lattices N·FCC, with a table per level
-├── face.rs                  # A face's measures along its axis
-├── surface.rs               # A cell's voxels that can show
-├── tables.rs                # The voxel's faces and shades per view face
-├── pillars.rs               # What a chunk shows: its relief's pillars, its medium
-└── lod.rs                   # Chunks: whole cells, levels by depth
+bake/src/                    # Chunks baked for native's flat engine (docs/architecture.md, section 3)
+├── face.rs                  # The 18 faces: the lattice seen along the cube's axes and edges
+├── lod.rs                   # Which cells of the octree a face draws, by level
+├── pillars.rs               # A cell's columns as pillars, and its medium slab by slab
+└── lib.rs                   # Baker: a cell's tiles read, its pillars and medium made
 worldgen/                    # The world-generation engine, no direction up in it; no worlds (docs/generators.md)
 ├── src/
 │   ├── generator.rs         # The framework: nodes, fields, populations
@@ -121,14 +118,15 @@ native/src/                  # The frontend: egui on winit and wgpu; in browsers
 ├── gpu.rs                   # The device; offscreen pictures; shaders checked without a GPU
 ├── threads.rs               # Threads natively and in browsers, which the thread that draws never waits for
 ├── world.rs                 # The world's tiles around the camera, made and lit on threads
-├── view.rs                  # The camera, the 12 faces, rays, screen boxes
+├── view.rs                  # The camera's basis and focal length
 ├── eye.rs                   # How light shows: the eye adapting, its curve
 ├── inspect.rs               # The voxel under the pointer, as the voxels engine finds it
-├── engine.rs                # What draws: Engine, Picture, Painter; the engines by name
+├── engine.rs                # What draws: Engine, Picture, Painter
 └── engine/
-    ├── chunks.rs            # The chunks engine
-    ├── chunks/              # Its renderer, occlusion, bakery, compositor (and .wgsl)
-    └── voxels.rs, voxels.wgsl # The voxels engine: rays through the tiles' voxels
+    ├── voxels.rs, voxels.wgsl # The voxels engine: rays through the tiles' voxels
+    ├── chunks.rs              # The flat engine: its renderer on a thread of its own
+    └── chunks/                # Its renderer (the cells picked and hidden), bakery,
+                               # occlusion, and compositor (compositor.rs, .wgsl)
 ```
 
 ## Workflow
@@ -144,7 +142,7 @@ pnpm check   # lint, the WebAssembly built, then test
 While iterating, run only the affected tests
 ([docs/testing.md](docs/testing.md));
 run `pnpm check` again only after changing code.
-After changing `worldgen/`, `ground/`, `worlds/` or `fcc/`, also run `pnpm test:worlds`:
+After changing `worldgen/`, `ground/`, `worlds/` or `lattice/`, also run `pnpm test:worlds`:
 the worlds' checks over seeds, which `pnpm test` leaves out.
 
 `pnpm lint` is clippy with warnings as errors, and rustfmt.

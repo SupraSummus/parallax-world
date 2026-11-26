@@ -83,7 +83,7 @@ fn draw_field(field: &Field, lines: &Lines, seed: u64, s: i64, clip: &Box3, floo
     let op = field.op;
     let field_seed = hash_text(field.name, seed);
     // A medium's share of a site, from its extinction.
-    let medium = |e: f64| share(1.0 - js::exp(-e * CHORD * s as f64));
+    let medium = |e: f64| share(1.0 - js::exp(-e * s as f64));
     let share_of = |extinction: Option<f64>| extinction.map_or(SHARE, medium);
     let picked = |x: i64, y: i64, z: i64| to_pick(hash(field_seed, x * s, y * s, z * s));
     // Block by block of lines along an axis, those it says it draws nothing in skipped; while checking, drawn to see
@@ -104,13 +104,13 @@ fn draw_field(field: &Field, lines: &Lines, seed: u64, s: i64, clip: &Box3, floo
         if bits > 0 {
             let weyl = |n: i64, row: i64, axis: usize| {
                 let phase = hash64(seed, 0x0f00_7041, row, (axis as i64) << 8 | bits as i64);
-                ((n as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15).wrapping_add(phase) >> (64 - bits)) as i64 - s / 2
+                ((n as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15).wrapping_add(phase) >> (64 - bits)) as i64 - sites::middle(s)
             };
             (offset[a], offset[b]) = (weyl(v, u, a), weyl(u, v, b));
         }
         offset
     };
-    let (bottom, top) = (lo[axis] * s, (hi[axis] - 1) * s);
+    let (bottom, top) = (lo[axis] * s, hi[axis] * s);
     // Blocks of lines across, each all along them or, given at each site, in parts along them too.
     let (side, along) = match lines {
         Lines::At(_) => (SITES, SITES),
@@ -125,8 +125,8 @@ fn draw_field(field: &Field, lines: &Lines, seed: u64, s: i64, clip: &Box3, floo
     for (bu, bv, bw) in blocks.flat_map(|(u, v)| (lo[axis]..hi[axis]).step_by(along.max(1) as usize).map(move |w| (u, v, w))) {
         let (to_u, to_v, to_w) = ((bu + side).min(hi[a]), (bv + side).min(hi[b]), (bw + along).min(hi[axis]));
         let mut block = Box3 { min: [0; 3], max: [0; 3] };
-        (block.min[a], block.max[a], block.min[b], block.max[b]) = (bu * s, (to_u - 1) * s + 1, bv * s, (to_v - 1) * s + 1);
-        (block.min[axis], block.max[axis]) = (bw * s, (to_w - 1) * s + 1);
+        (block.min[a], block.max[a], block.min[b], block.max[b]) = (bu * s, to_u * s, bv * s, to_v * s);
+        (block.min[axis], block.max[axis]) = (bw * s, to_w * s);
         let meets = field.meets_in(&block, s);
         if meets == Meets::Nothing && !checking() {
             continue;
@@ -151,13 +151,13 @@ fn draw_field(field: &Field, lines: &Lines, seed: u64, s: i64, clip: &Box3, floo
                 }
                 match lines {
                     Lines::At(at) => {
-                        let mut w = first + ((first + u + v) & 1);
+                        let mut w = first;
                         while w < to_w {
                             site[axis] = w;
                             let [x, y, z] = site;
                             let value = all.map(|kind| (kind, None)).or_else(|| {
                                 work.reads += 1;
-                                sites::footprint(s, [0; 3], || at(x * s, y * s, z * s))
+                                sites::footprint(s, [0; 3], || at(middle(x, s), middle(y, s), middle(z, s)))
                             });
                             if let Meets::All(kind) = meets
                                 && value != Some((kind, None))
@@ -167,7 +167,7 @@ fn draw_field(field: &Field, lines: &Lines, seed: u64, s: i64, clip: &Box3, floo
                             if let Some((kind, extinction)) = value {
                                 put(kind.into(), op, share_of(extinction), picked(x, y, z), x, y, z);
                             }
-                            w += 2;
+                            w += 1;
                         }
                     }
                     Lines::Spans { spans, .. } => {
@@ -176,7 +176,7 @@ fn draw_field(field: &Field, lines: &Lines, seed: u64, s: i64, clip: &Box3, floo
                             Some(kind) => vec![Span::solid(DEEP, top + 2 * s, kind)],
                             None => {
                                 work.reads += 1;
-                                sites::footprint(s, offset(u, v), || spans(u * s, v * s))
+                                sites::footprint(s, offset(u, v), || spans(middle(u, s), middle(v, s)))
                             }
                         };
                         if let Meets::All(kind) = meets {
@@ -194,7 +194,7 @@ fn draw_field(field: &Field, lines: &Lines, seed: u64, s: i64, clip: &Box3, floo
                         }
                         // Solid spans cover the line's sites together, as they lie along it.
                         let (solid, thin): (Vec<&Span>, Vec<&Span>) = spans.iter().partition(|span| span.holds == Holds::Solid);
-                        cover(&solid, axis, [u, v], (first, hi[axis]), s, op, &mut |look, share, w| {
+                        cover(&solid, axis, (first, hi[axis]), s, op, &mut |look, share, w| {
                             site[axis] = w;
                             put(look, op, share, picked(site[0], site[1], site[2]), site[0], site[1], site[2]);
                         });
@@ -202,9 +202,9 @@ fn draw_field(field: &Field, lines: &Lines, seed: u64, s: i64, clip: &Box3, floo
                         for span in thin {
                             let Holds::Medium(e) = span.holds else { unreachable!("solid spans are covered") };
                             let first = ((span.from - s).div_euclid(s) + 1).max(first);
-                            let mut w = first + ((first + u + v) & 1);
-                            while w * s < span.to + s && w < hi[axis] {
-                                let at = |end: i64| ((end - w * s) as f64 / s as f64).clamp(-1.0, 1.0);
+                            let mut w = first;
+                            while w * s < span.to && w < hi[axis] {
+                                let at = |end: i64| (2.0 * (end - w * s) as f64 / s as f64 - 1.0).clamp(-1.0, 1.0);
                                 let own = (at(span.from), at(span.to));
                                 site[axis] = w;
                                 let pick = picked(site[0], site[1], site[2]);
@@ -218,13 +218,13 @@ fn draw_field(field: &Field, lines: &Lines, seed: u64, s: i64, clip: &Box3, floo
                                     parts.push((own, Lies::It));
                                     parts.retain(|((from, to), _)| from < to);
                                     parts.sort_by(|((p, _), _), ((q, _), _)| p.total_cmp(q));
-                                    let [down, up, along] = held(&parts, e * CHORD * s as f64);
+                                    let [down, up, along] = held(&parts, e * s as f64);
                                     let kind = span.kind;
                                     let faces = Faces::along(axis, [(kind, up), (kind, along), (kind, down)]);
                                     // A see-through kind has one share for every face (VoxelGrid's `medium`): its most across the line.
                                     put(Look { kind, faces: Some(faces) }, op, down.max(up), pick, site[0], site[1], site[2]);
                                 }
-                                w += 2;
+                                w += 1;
                             }
                         }
                     }
@@ -257,7 +257,7 @@ type Part = ((f64, f64), Lies);
  * line comes in by from above, those from below, and those along it.
  * `parts` are the line's spans' parts of the voxel, the medium's among
  * them, none empty, in order of where they start, and `depth` how much
- * the medium stops along a mean chord's length.
+ * the medium stops along the voxel's chord along the line.
  *
  * It stops the chords that cross it, each as far as it runs in it: across
  * the line as a ray along the line does (`crossed`), along the line all
@@ -295,16 +295,16 @@ fn held(parts: &[Part], depth: f64) -> [u32; 3] {
  * level alike: a site holds what its part of the spans looks like, whole
  * only if they hold all of its voxel.
  */
-fn cover(spans: &[&Span], axis: usize, line: [i64; 2], (lo, hi): (i64, i64), s: i64, op: Op, put: &mut dyn FnMut(Look, u32, i64)) {
+fn cover(spans: &[&Span], axis: usize, (lo, hi): (i64, i64), s: i64, op: Op, put: &mut dyn FnMut(Look, u32, i64)) {
     let (Some(from), Some(to)) = (spans.iter().map(|span| span.from).min(), spans.iter().map(|span| span.to).max()) else { return };
-    // The sites whose voxels, s each way along the axis, meet [from, to].
+    // The sites whose voxels, [w, w + 1) · s along the axis, meet [from, to].
     let first = ((from - s).div_euclid(s) + 1).max(lo);
-    let mut w = first + ((first + line[0] + line[1]) & 1);
+    let mut w = first;
     // Kept from site to site: a line has thousands.
     let mut parts: Vec<(f64, f64, Kind)> = Vec::new();
     let mut ends: Vec<(f64, f64)> = Vec::new();
-    while w * s < to + s && w < hi {
-        let at = |end: i64| ((end - w * s) as f64 / s as f64).clamp(-1.0, 1.0);
+    while w * s < to && w < hi {
+        let at = |end: i64| (2.0 * (end - w * s) as f64 / s as f64 - 1.0).clamp(-1.0, 1.0);
         // Each span's part of the voxel, −1 to 1 along the axis, in order.
         parts.clear();
         parts.extend(spans.iter().map(|span| (at(span.from), at(span.to), span.kind)).filter(|p| p.0 < p.1));
@@ -318,7 +318,7 @@ fn cover(spans: &[&Span], axis: usize, line: [i64; 2], (lo, hi): (i64, i64), s: 
             let until = ends.filter(|&end| end >= top).min().expect("the span it is whole in");
             while w < hi && (w + 1) * s <= until {
                 put(kind.into(), SHARE, w);
-                w += 2;
+                w += 1;
             }
             continue;
         }
@@ -331,7 +331,7 @@ fn cover(spans: &[&Span], axis: usize, line: [i64; 2], (lo, hi): (i64, i64), s: 
             let faces = Faces::along(axis, [(bottom.2, across), (most, along), (top.2, across)]);
             put(Look { kind: most, faces: Some(faces) }, across.max(along), w);
         }
-        w += 2;
+        w += 1;
     }
 }
 
@@ -387,7 +387,7 @@ pub(super) fn broke(key: &str, site: [i64; 3], s: i64, clip: &Box3, what: &str) 
     CHECKING.with_borrow_mut(|broken| broken.as_mut().expect("checking").push(message));
 }
 
-/** The lattice units of the sites `s` apart of `clip`. */
+/** The lattice units of the sites `s` apart of `clip`: their voxels, the cubes [site, site + 1) · s. */
 pub(super) fn units_of(clip: &Box3, s: i64) -> Box3 {
-    Box3 { min: clip.min.map(|v| v * s), max: clip.max.map(|v| (v - 1) * s + 1) }
+    Box3 { min: clip.min.map(|v| v * s), max: clip.max.map(|v| v * s) }
 }

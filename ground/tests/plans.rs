@@ -2,9 +2,9 @@
 
 use std::sync::Arc;
 
-use fcc::FACE_KINDS;
 use ground::columns;
 use ground::plan::Plan;
+use lattice::FACE_KINDS;
 use worldgen::generator::{Generator, KindDef, Layer, Op, Span, generate};
 use worldgen::grid::{ALPHA, Box3, COLOUR_ONE};
 
@@ -26,7 +26,7 @@ fn world(layer: Layer) -> Generator {
  * kinds), and the grid's looks.
  */
 fn stripes(dithered: bool, level: u32) -> (f64, Vec<u32>) {
-    let make = |x: i64, _| if x.rem_euclid(8) == 0 { ROCK } else { GRASS };
+    let make = |x: i64, _| if x.rem_euclid(8) == 1 { ROCK } else { GRASS };
     let plan = Arc::new(if dithered { Plan::dithered("stripes", 1, make) } else { Plan::new("stripes", 1, make) });
     let ground = columns("ground", 0.0, Op::Fill, move |x, z| vec![Span::solid(-8, 0, plan.at(x, z))]);
     let (generator, b) = (world(Layer::Field(ground)), Box3 { min: [0, -8 >> level, 0], max: [4096 >> level, 0, 64] });
@@ -42,13 +42,13 @@ fn stripes(dithered: bool, level: u32) -> (f64, Vec<u32>) {
             (red, stopped) = (red + colour[0] as f64 / COLOUR_ONE as f64, stopped + alpha as f64 / ALPHA as f64);
         }
     }
-    let [rock, grass] = [0x77, 0x44].map(|c: u8| fcc::light::srgb_to_linear(c as f32 / 255.0) as f64);
+    let [rock, grass] = [0x77, 0x44].map(|c: u8| lattice::light::srgb_to_linear(c as f32 / 255.0) as f64);
     ((red / stopped - grass) / (rock - grass), looks)
 }
 
 #[test]
 fn fields_read_a_dithered_plan_as_often_as_it_covers() {
-    // Lines of sites 4 apart read where they are: every other one is on a stripe. Read at a point of the 4 × 4
+    // Lines of sites 4 apart read a column each, at x = 4u + 1: every other one is on a stripe. Read at a point of the 4 × 4
     // columns each stands for, one in eight.
     let (point, dithered) = (stripes(false, 2).0, stripes(true, 2).0);
     assert!((point - 0.5).abs() < 0.01, "read where each line is: {point}");
