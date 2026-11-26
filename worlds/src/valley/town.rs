@@ -377,9 +377,7 @@ impl Town {
 
     /**
      * The square's paving at column (x, z): flags a metre square, light or
-     * dark at random. Not a checker: from above, a flat ground shows the
-     * top sites of every other column, which at sites a metre apart would
-     * all be its light flags or all its dark.
+     * dark at random.
      */
     fn paving(&self, x: i64, z: i64) -> Spot {
         let light = hash64(self.seed, (x - self.x).div_euclid(m(1.0)), (z - self.z).div_euclid(m(1.0)), 7) & 1 == 0;

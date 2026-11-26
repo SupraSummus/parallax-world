@@ -1,7 +1,7 @@
 //! The cheese: endless every way, holed through with caverns a few metres
 //! wide, tunnels between them and eyes in their walls, lit by magic
 //! crystals growing from the caverns' walls. No way is up but for a body
-//! walking it (fcc/src/walk.rs): it climbs the caverns' floors, walks the
+//! walking it (lattice/src/walk.rs): it climbs the caverns' floors, walks the
 //! tunnels, and a pillar's winding stairs in each cavern lead up into the
 //! one over it. The caverns overlap enough to make one maze.
 //! Written from the engine's public API alone (docs/generators.md).
@@ -465,14 +465,24 @@ pub const CHEESE: Entry = Entry {
     make: cheese,
     levels: 7,
     accuracy: &[],
-    // Why: docs/todo.md, "Four of the cheese's tiles are over the cost budget".
-    // The mine's galleries run along x and z: docs/todo.md, "The city and the cheese's mine line up with the lattice".
+    // Why: docs/todo.md, "Most of the cheese's tiles are over the cost budget".
+    // The mine's galleries run along x and z, and on cubes the holes around spawn line up too: docs/todo.md,
+    // "The city and the cheese's mine line up with the lattice".
     // The grottoes keep between the mine's lumps' lattice: docs/todo.md, "The cheese's mine keeps to its lumps' lattice".
     known: &[
+        Known::OverBudget("spawn", 0),
+        Known::OverBudget("spawn", 1),
+        Known::OverBudget("spawn", 2),
+        Known::OverBudget("spawn", 4),
+        Known::OverBudget("spawn", 5),
         Known::OverBudget("spawn", 6),
         Known::OverBudget("spawn", 7),
+        Known::OverBudget("mine", 2),
+        Known::OverBudget("mine", 4),
+        Known::OverBudget("mine", 5),
         Known::OverBudget("mine", 6),
         Known::OverBudget("mine", 7),
+        Known::Turned("spawn"),
         Known::Turned("anywhere"),
         Known::Turned("mine"),
         Known::Prefers("grottoes"),
@@ -498,9 +508,8 @@ pub fn cheese(seed: u64) -> World {
     let world = Scope::new(seed);
     let seeds = Seeds::of(&world);
     let ([x, y, z], _) = CAVERNS.ball(seeds.caverns, [0, 0, 0], &Scalar::constant(Fx::ONE)).expect("a cavern in every cell");
-    // Clear of the stairs, on a site: x + y + z even.
-    let x = x + m(3.5);
-    let spawn = [x, y - (x + y + z).rem_euclid(2), z];
+    // Clear of the stairs.
+    let spawn = [x + m(3.5), y, z];
     let mine = Arc::new(mine::Mine::new(&world.of("mine")));
     // The holed cheese has what the mine doesn't outbid it for; both dig the cheese, all through.
     let [holed, mined] = shares(LEAD, [Scalar::constant(Fx::ZERO), mine.bid()]);

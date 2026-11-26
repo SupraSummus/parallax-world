@@ -172,7 +172,8 @@ fn points(
         })
     };
     let (towns, moorland) = (terrain.towns.clone(), moorland.clone());
-    let (range, floor) = (terrain.clone(), terrain.clone());
+    let (range, floor, start) = (terrain.clone(), terrain.clone(), terrain.clone());
+    let pools = moorland.clone();
     vec![
         (
             "town",
@@ -183,12 +184,16 @@ fn points(
         ),
         ("chapel", site(Landmark::Chapel)),
         ("windmill", site(Landmark::Windmill)),
+        // Ponds are narrower than the survey's sites: named, their water is found at any seed.
+        ("pond", site(Landmark::Pond)),
         ("mountainside", Box::new(move || mountainside(&range))),
         ("coast", {
             let terrain = terrain.clone();
             Box::new(move || coast(&terrain))
         }),
         ("steading", Box::new(move || steading(&floor, &moorland))),
+        // The moor's pools too, rare on the valley's uplands.
+        ("pool", Box::new(move || pools.pool_nearest(start.path.x(0).round_units().0, 0).expect("a pool within 16 km of the start"))),
         ("station", {
             let railway = railway.clone();
             Box::new(move || railway.first_station())

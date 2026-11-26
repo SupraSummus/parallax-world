@@ -15,7 +15,7 @@
 //! camera than the engine may ask for (Wants's reach) are dropped, and
 //! the light's with them (worldgen's Shared). A tile
 //! never changes, so a chunk baked once all the tiles it reads are in
-//! stays right whatever comes after (fcc's Tiles). Given light (worldgen's Shared),
+//! stays right whatever comes after (lattice's Tiles). Given light (worldgen's Shared),
 //! the bakers' Lights read its tiles, each site as it is, where
 //! they read them. Asked for light, for the voxels engine
 //! (voxels.rs), the bricks of tiles made that its rays asked for are lit,
@@ -29,9 +29,9 @@ use std::collections::VecDeque;
 use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};
 use std::sync::{Arc, Mutex, OnceLock};
 
-use fcc::GRID_LEVELS;
-pub use fcc::TileId;
-use fcc::{Blocks, FastSet, Grid, Tiles};
+use lattice::GRID_LEVELS;
+pub use lattice::TileId;
+use lattice::{ALPHA, BRICK, BRICK_SITES, Blocks, FastSet, Grid, Tiles, alpha_of, medium};
 use light::{Light, Shared};
 use worldgen::tiles::{made_with, make_tiles};
 
@@ -62,24 +62,22 @@ fn heights(world: &worldgen::World) -> Heights {
 }
 
 /**
- * A generated tile: its voxels, the cells of the lattice they meet
- * (voxels.rs), by brick and in all, its whole bricks, and, lit, its
- * bricks' light as the voxels engine takes it, found as it asks for them.
+ * A generated tile: its voxels, which of its bricks are whole and which
+ * hold a medium, and, lit, its bricks' light as the voxels engine takes
+ * it, found as it asks for them.
  */
 pub struct Tile {
     pub grid: Arc<Grid>,
-    /** voxels::meets. */
-    pub meets: Vec<u32>,
-    pub met: voxels::Met,
-    /** By place in the grid's bricks, a bit each: whether all its sites are whole voxels (whole). */
-    pub whole: Arc<[u64]>,
+    /** By place in the grid's bricks, a bit each: whether all its sites are whole voxels; whether any is a medium's. */
+    whole: Arc<[u64]>,
+    media: Arc<[u64]>,
     /** By where a brick's sites are in the grid's cells (in bricks), voxels::light of it, once found. */
     lights: Box<[OnceLock<Box<[u32]>>]>,
 }
 
 /**
- * A level's tiles made so far, and their voxels as the bakers read them:
- * as they were when it was taken. Both are held in blocks (fcc's Blocks),
+ * A level's tiles made so far, and their voxels as a walking body reads
+ * them: as they were when it was taken. Both are held in blocks (lattice's Blocks),
  * so that the next, some tiles come or gone, costs as those do.
  */
 #[derive(Clone)]
@@ -90,16 +88,15 @@ pub struct Level {
 
 impl Tile {
     /** Tile `id`, unlit. */
-    pub fn new(id: TileId, grid: Arc<Grid>) -> Tile {
-        let meets = voxels::meets(&grid);
-        let met = voxels::Met::new(id, &grid, &meets);
-        Tile { whole: whole(&grid), lights: unlit(&grid), grid, meets, met }
+    pub fn new(grid: Arc<Grid>) -> Tile {
+        let whole = bricks(&grid, |sites| sites.iter().all(|&look| alpha_of(look) == ALPHA));
+        let media = bricks(&grid, |sites| sites.iter().any(|&look| medium(look)));
+        Tile { lights: unlit(&grid), grid, whole, media }
     }
 
     /** Tile `self` with none of its light found. */
     pub fn unlit(&self) -> Tile {
-        let (grid, meets, met, whole) = (self.grid.clone(), self.meets.clone(), self.met.clone(), self.whole.clone());
-        Tile { lights: unlit(&grid), grid, meets, met, whole }
+        Tile { lights: unlit(&self.grid), grid: self.grid.clone(), whole: self.whole.clone(), media: self.media.clone() }
     }
 
     /** The light of the brick whose sites start at `first` in the grid's cells (in bricks), if found. */
@@ -116,19 +113,20 @@ impl Tile {
 
 /** No light found for any brick of `grid`. */
 fn unlit(grid: &Grid) -> Box<[OnceLock<Box<[u32]>>]> {
-    (0..grid.cells.len() / fcc::BRICK_SITES).map(|_| OnceLock::new()).collect()
+    (0..grid.cells.len() / BRICK_SITES).map(|_| OnceLock::new()).collect()
 }
 
 /**
- * By place in `grid`'s bricks, a bit each: whether every site of the
- * brick holds a whole voxel. Slots past the grid's box hold none, so a
- * brick it cuts is not whole.
+ * By place in `grid`'s bricks, a bit each: whether `holds` the looks of
+ * its sites. A brick with no voxels holds none; slots past the grid's box
+ * neither, so a brick it cuts is not whole.
  */
-fn whole(grid: &Grid) -> Arc<[u64]> {
+fn bricks(grid: &Grid, holds: impl Fn(&[u32]) -> bool) -> Arc<[u64]> {
     let mut bits = vec![0; grid.bricks.len().div_ceil(64)];
     for (place, &at) in grid.bricks.iter().enumerate() {
-        let sites = usize::try_from(at).map(|at| at * fcc::BRICK_SITES..(at + 1) * fcc::BRICK_SITES);
-        if sites.is_ok_and(|mut sites| sites.all(|i| fcc::alpha_of(grid.cells[i]) == fcc::ALPHA)) {
+        if let Ok(at) = usize::try_from(at)
+            && holds(&grid.cells[at * BRICK_SITES..(at + 1) * BRICK_SITES])
+        {
             bits[place / 64] |= 1 << (place % 64);
         }
     }
@@ -156,59 +154,57 @@ impl Level {
     }
 
     /**
-     * Whether a voxel of its tiles, or (`see_through`) one of a medium,
-     * meets the cell of `radius`·FCC about `centre`, a rhombic dodecahedron
-     * as a voxel is of radius 1.
-     * A cell smaller than those of 8·FCC is read site by site;
-     * a larger one asks the cells of 8·FCC or 32·FCC that meet it (voxels::Met),
-     * so of those sizes it is exact, and of the others it may say yes wrongly.
+     * Whether a voxel of its tiles, or (`see_through`) one of a medium, is
+     * in the box of sites from `lo` to `hi`, inclusive: read site by site
+     * if it is small, else brick by brick, so it may say yes wrongly of a
+     * large one, never no.
      */
-    pub fn meets(&self, centre: [i32; 3], radius: i32, see_through: bool) -> bool {
-        if radius < voxels::cell_size(0) {
-            let kept = |look| if see_through { fcc::medium(look) } else { look != 0 };
-            return meeting(centre, radius, 1).any(|q| self.grids.at(q[0], q[1], q[2]).is_some_and(kept));
+    pub fn meets(&self, lo: [i32; 3], hi: [i32; 3], see_through: bool) -> bool {
+        if (0..3).map(|d| i64::from(hi[d] - lo[d] + 1)).product::<i64>() <= BRICK_SITES as i64 {
+            let kept = |look| if see_through { medium(look) } else { look != 0 };
+            return within([lo, hi]).any(|q| self.grids.at(q[0], q[1], q[2]).is_some_and(kept));
         }
-        let j = usize::from(radius >= voxels::cell_size(1));
-        meeting(centre, radius, voxels::cell_size(j))
-            .any(|k| within(voxels::Met::tiles(j, k)).any(|t| self.tiles.get(t).is_some_and(|tile| tile.met.has(t, j, k, see_through))))
+        self.bricks(
+            lo,
+            hi,
+            |tile, place| if see_through { tile.media[place / 64] >> (place % 64) & 1 != 0 } else { tile.grid.bricks[place] >= 0 },
+        )
+        .any(|b| b)
     }
 
     /**
      * Whether every site from `lo` to `hi`, inclusive, holds a whole voxel:
-     * whether all the bricks holding them are whole (Tile's `whole`), all
-     * their tiles made. So it may say no wrongly, never yes.
+     * whether all the bricks holding them are whole, all their tiles made.
+     * So it may say no wrongly, never yes.
      */
     pub fn buried(&self, lo: [i32; 3], hi: [i32; 3]) -> bool {
         let tile = |v: i32| (v as i64).div_euclid(TILE) as i32;
         within([lo.map(tile), hi.map(tile)]).all(|id| {
             let Some(t) = self.tiles.get(id) else { return false };
             let g = &t.grid;
-            // The box within the tile, by brick of its grid, whose box is to hold it.
-            let (from, to): ([i32; 3], [i32; 3]) = (
-                std::array::from_fn(|d| lo[d].max((id[d] as i64 * TILE) as i32) - g.min[d]),
-                std::array::from_fn(|d| hi[d].min(((id[d] as i64 + 1) * TILE) as i32 - 1) - g.min[d]),
-            );
-            let bricks = g.n.map(|v| (v + fcc::BRICK - 1) / fcc::BRICK);
-            (0..3).all(|d| from[d] >= 0 && to[d] < g.n[d])
-                && within([from.map(|v| v / fcc::BRICK), to.map(|v| v / fcc::BRICK)]).all(|[i, j, k]| {
-                    let place = ((k * bricks[1] + j) * bricks[0] + i) as usize;
-                    t.whole[place / 64] >> (place % 64) & 1 != 0
-                })
+            let tile_lo = id.map(|v| (v as i64 * TILE) as i32);
+            (0..3).all(|d| lo[d].max(tile_lo[d]) >= g.min[d] && hi[d].min(tile_lo[d] + TILE as i32 - 1) < g.min[d] + g.n[d])
+        }) && self.bricks(lo, hi, |tile, place| tile.whole[place / 64] >> (place % 64) & 1 != 0).all(|b| b)
+    }
+
+    /** What `of` says of each brick of its tiles' grids that the box from `lo` to `hi` meets, given its tile and its place among the grid's bricks. */
+    fn bricks<'a>(&'a self, lo: [i32; 3], hi: [i32; 3], of: impl Fn(&Tile, usize) -> bool + 'a) -> impl Iterator<Item = bool> + 'a {
+        let tile = |v: i32| (v as i64).div_euclid(TILE) as i32;
+        within([lo.map(tile), hi.map(tile)]).flat_map(move |id| {
+            let found = self.tiles.get(id).map(|t| {
+                let g = &t.grid;
+                let count = g.n.map(|v| (v + BRICK - 1) / BRICK);
+                let tile_lo = id.map(|v| (v as i64 * TILE) as i32);
+                // The box within the grid, in its bricks.
+                let from: [i32; 3] = std::array::from_fn(|d| (lo[d].max(tile_lo[d]).max(g.min[d]) - g.min[d]) / BRICK);
+                let to: [i32; 3] = std::array::from_fn(|d| {
+                    (hi[d].min(tile_lo[d] + TILE as i32 - 1).min(g.min[d] + g.n[d] - 1) - g.min[d]).div_euclid(BRICK)
+                });
+                within([from, to]).map(|[i, j, k]| of(t, ((k * count[1] + j) * count[0] + i) as usize)).collect::<Vec<_>>()
+            });
+            found.unwrap_or_default()
         })
     }
-}
-
-/**
- * The cells of `s`·FCC (about k · s, k's coordinates adding up to an even
- * number) that meet the cell of `radius`·FCC about `centre`: rhombic
- * dodecahedra meet where their centres are nearer than the sum of their
- * radii across each pair of faces. Of 1·FCC, the sites in it.
- */
-fn meeting(centre: [i32; 3], radius: i32, s: i32) -> impl Iterator<Item = [i32; 3]> {
-    let r = s + radius;
-    let apart = move |k: [i32; 3], d: usize| (k[d] * s - centre[d]).abs();
-    let near = [centre.map(|v| (v - r).div_euclid(s) + 1), centre.map(|v| (v + r - 1).div_euclid(s))];
-    within(near).filter(move |k| (k[0] + k[1] + k[2]) & 1 == 0 && (0..3).all(|d| apart(*k, d) + apart(*k, (d + 1) % 3) < r))
 }
 
 /** The points from `lo` to `hi`, inclusive: tiles, or cells. */
@@ -430,7 +426,7 @@ impl Worker {
                 };
                 let tile = |(key, grid): ([i64; 3], Grid)| {
                     let id = key.map(|v| v as i32);
-                    (level, Piece::Tile(id), Some(Arc::new(Tile::new(id, Arc::new(grid)))))
+                    (level, Piece::Tile(id), Some(Arc::new(Tile::new(Arc::new(grid)))))
                 };
                 grids.into_iter().map(tile).collect()
             }
@@ -706,7 +702,7 @@ pub fn tiles_about(world: &worldgen::World, level: u32, centre: [i32; 3], reach:
     for id in within([centre.map(|v| tile(v - reach)), centre.map(|v| tile(v + reach - 1))]) {
         if !tiles.contains_key(&id) {
             let made = make_tiles(world, level, id.map(i64::from)).into_iter().map(|(key, grid)| (key.map(|v| v as i32), grid));
-            tiles.extend(made.map(|(id, grid)| (id, Arc::new(Tile::new(id, Arc::new(grid))))));
+            tiles.extend(made.map(|(id, grid)| (id, Arc::new(Tile::new(Arc::new(grid))))));
         }
     }
     tiles.retain(|id, _| (0..3).all(|d| (tile(centre[d] - reach)..=tile(centre[d] + reach - 1)).contains(&id[d])));
@@ -736,7 +732,8 @@ mod tests {
                 world.wait();
             }
         }
-        let light = |t: &Tile| -> Vec<_> { (0..t.grid.cells.len() / fcc::BRICK_SITES).map(|f| t.light(f).map(<[u32]>::to_vec)).collect() };
+        let light =
+            |t: &Tile| -> Vec<_> { (0..t.grid.cells.len() / lattice::BRICK_SITES).map(|f| t.light(f).map(<[u32]>::to_vec)).collect() };
         let mut lights: Vec<_> = world.level(coarsest).tiles.iter().map(|(id, t)| (id, light(t))).collect();
         lights.sort();
         assert!(lights.iter().any(|(_, l)| l.iter().any(Option::is_some)), "some light found");
@@ -745,11 +742,11 @@ mod tests {
 
     /** Where the sites of each brick of `grid` with voxels start. */
     fn corners(grid: &Grid) -> impl Iterator<Item = [i32; 3]> + '_ {
-        let count = grid.n.map(|v| (v + fcc::BRICK - 1) / fcc::BRICK);
+        let count = grid.n.map(|v| (v + lattice::BRICK - 1) / lattice::BRICK);
         (grid.bricks.iter().enumerate()).filter(|(_, first)| **first >= 0).map(move |(place, _)| {
             let b = place as i32;
             let at = [b % count[0], b / count[0] % count[1], b / count[0] / count[1]];
-            std::array::from_fn(|d| grid.min[d] + at[d] * fcc::BRICK)
+            std::array::from_fn(|d| grid.min[d] + at[d] * lattice::BRICK)
         })
     }
 
@@ -768,55 +765,6 @@ mod tests {
                 }
             }
         }
-    }
-
-    /**
-     * Level::meets answers as reading each site would, about a world's spawn
-     * at a level: yes for each cell holding a voxel, or a see-through one,
-     * and no for each other of 8·FCC, 32·FCC or smaller.
-     */
-    #[test]
-    fn cells_meet_the_voxels_they_hold() {
-        // Around the corner of cubes this many sites a side that is nearest the spawn, as far each way.
-        const REACH: i32 = 128;
-        let mut see_through = 0;
-        for (name, level) in [("city", 0), ("moor", 0), ("forest", 2)] {
-            let world = (worlds::by_name(name).expect("world").make)(1);
-            let spawn = world.spawn.map(|v| (v >> level) as i32);
-            let corner = spawn.map(|v| (v as f64 / REACH as f64).round() as i32 * REACH);
-            let level = Level::new(tiles_about(&world, level, corner, REACH));
-            for kept in [false, true] {
-                let voxel = |look: fcc::Look| if kept { fcc::medium(look) } else { look != 0 };
-                let held = |q: [i32; 3]| (q[0] + q[1] + q[2]) & 1 == 0 && level.grids.at(q[0], q[1], q[2]).is_some_and(voxel);
-                for radius in [1, 2, 4, 8, 16, 32] {
-                    // Each cell within REACH of the spawn (to the next multiple of 64, a site of each), or 8 cells, the nearer.
-                    let n = (REACH / radius).min(8);
-                    let cells: Vec<[i32; 3]> = within([[-n; 3], [n; 3]])
-                        .filter(|p| (p[0] + p[1] + p[2]) & 1 == 0)
-                        .map(|p| std::array::from_fn(|d| (spawn[d] + 32).div_euclid(64) * 64 + p[d] * radius))
-                        .collect();
-                    let mut holding = 0;
-                    for &c in &cells {
-                        let inside = |q: [i32; 3]| (0..3).all(|d| (q[d] - c[d]).abs() + (q[(d + 1) % 3] - c[(d + 1) % 3]).abs() <= radius);
-                        let holds = within([c.map(|v| v - radius), c.map(|v| v + radius)]).any(|q| inside(q) && held(q));
-                        let meets = level.meets(c, radius, kept);
-                        assert!(meets || !holds, "{name}: a cell of {radius} about {c:?} holds a voxel (see-through: {kept})");
-                        assert!(!meets || holds || radius == 16, "{name}: a cell of {radius} about {c:?} holds none (see-through: {kept})");
-                        holding += usize::from(holds);
-                    }
-                    if kept {
-                        see_through += holding;
-                    } else {
-                        assert!(
-                            holding > 0 && holding < cells.len(),
-                            "{name}, cells of {radius}: {holding} of {} hold voxels",
-                            cells.len()
-                        );
-                    }
-                }
-            }
-        }
-        assert!(see_through > 0, "some cells hold see-through voxels");
     }
 
     #[test]

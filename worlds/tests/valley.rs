@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use worldgen::generator::{Layer, generate, generate_shown, kind_of};
-use worldgen::grid::{ALPHA, Box3, is_site};
+use worldgen::grid::{ALPHA, Box3};
 use worldgen::noise::Scope;
 use worldgen::tiles::{TILE, make_tiles, tile_box};
 use worldgen::units::UNIT_SIZE;
@@ -42,13 +42,14 @@ fn tiles_made_together_show_what_each_shows_alone() {
         for (key, together) in &columns.flat_map(|key| make_tiles(&world, level, key)).collect::<Vec<_>>() {
             let b = tile_box(heights, *key);
             let alone = generate_shown(&world.generator, &b, level, worldgen::world::UP).to_grid();
-            let faces = |g: &fcc::Grid, [x, y, z]: [i32; 3]| std::array::from_fn::<_, { fcc::FACE_KINDS }, _>(|k| g.face(x, y, z, k));
-            let held = |g: &fcc::Grid, p @ [x, y, z]: [i32; 3]| (g.get(x, y, z), faces(g, p), g.solid(x, y, z), g.glow(x, y, z));
-            let whole = |p: [i32; 3]| [&alone, together].iter().all(|g| fcc::alpha_of(g.get(p[0], p[1], p[2])) == ALPHA);
+            let faces =
+                |g: &lattice::Grid, [x, y, z]: [i32; 3]| std::array::from_fn::<_, { lattice::FACE_KINDS }, _>(|k| g.face(x, y, z, k));
+            let held = |g: &lattice::Grid, p @ [x, y, z]: [i32; 3]| (g.get(x, y, z), faces(g, p), g.solid(x, y, z), g.glow(x, y, z));
+            let whole = |p: [i32; 3]| [&alone, together].iter().all(|g| lattice::alpha_of(g.get(p[0], p[1], p[2])) == ALPHA);
             let sites =
                 (b.min[0]..b.max[0]).flat_map(|x| (b.min[1]..b.max[1]).flat_map(move |y| (b.min[2]..b.max[2]).map(move |z| [x, y, z])));
-            for p in sites.filter(|&[x, y, z]| is_site(x, y, z)).map(|p| p.map(|v| v as i32)) {
-                let around = fcc::VOXEL_FACES.iter().flat_map(|f| [1, -1].map(|n| [0, 1, 2].map(|a| p[a] + n * f[a])));
+            for p in sites.map(|p| p.map(|v| v as i32)) {
+                let around = lattice::VOXEL_FACES.iter().flat_map(|f| [1, -1].map(|n| [0, 1, 2].map(|a| p[a] + n * f[a])));
                 // Whole, and all around it in the tile too: no ray gets to it.
                 if whole(p) && around.filter(|q| b.holds(q.map(i64::from))).all(whole) {
                     continue;
@@ -172,7 +173,7 @@ fn ponds_hold_their_water_below_the_ground_round_them() {
         for z in area.min[2]..area.max[2] {
             for x in area.min[0]..area.max[0] {
                 let (mut ground, mut surface) = (i64::MIN, None);
-                for y in (area.min[1]..area.max[1]).filter(|&y| is_site(x, y, z)) {
+                for y in area.min[1]..area.max[1] {
                     if kind(grid.get(x, y, z)).is_some_and(|k| k.name == "water") {
                         surface = Some(y);
                     } else if grid.solid(x, y, z) > ALPHA / 2 {

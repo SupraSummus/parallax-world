@@ -1,9 +1,7 @@
 # The worlds
 
 What there is to see in the worlds, and how to look at them.
-Their voxels are rhombic dodecahedra, not cubes;
-scenes keep their shapes (flat walls along the axes,
-rectangular buildings), only their surfaces are made of rhombi.
+Their voxels are cubes, a coarser one the eight finer in it.
 
 ## Looking at them
 
@@ -20,11 +18,9 @@ it walks through plants and water, as each world marks its kinds.
 **Drawing** – Rays go through the voxels, from one to the next across
 their faces, each level of detail as far as it is held around the eye,
 then the next coarser.
-A voxel may look different through each of its 12 faces,
+A voxel may look different through each of its 6 faces,
 so a coarse voxel at a house's eaves is roof from above and wall from the side.
 See-through voxels (mist, the sea) add up along a ray.
-The chunks engines (`--engine`, window only) instead bake cells of the lattice
-as seen along twelve directions, and draw them in relief.
 See [architecture.md](architecture.md).
 
 **Light** – Voxels are shaded by the way their faces face,

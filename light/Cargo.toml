@@ -5,5 +5,5 @@ edition = "2024"
 publish = false
 
 [dependencies]
-fcc = { path = "../fcc" }
+lattice = { path = "../lattice" }
 worldgen = { path = "../worldgen" }

@@ -1,6 +1,6 @@
 //! Pictures of a world at one level of detail, without the browser: for
 //! a world's author to look at, and for checks to measure. Rays cross the
-//! level's voxels exactly (fcc's ray.rs); the tiles they cross are
+//! level's voxels exactly (lattice's ray.rs); the tiles they cross are
 //! generated as they reach them, as hosts make them (generate_shown).
 
 use std::collections::{BTreeSet, HashMap};
@@ -8,8 +8,8 @@ use std::panic::AssertUnwindSafe;
 use std::sync::{Mutex, mpsc};
 use std::time::{Duration, Instant};
 
-use fcc::Look;
-use fcc::ray::{FACES, Ray, over};
+use lattice::Look;
+use lattice::ray::{FACES, Ray, over};
 
 use crate::generator::{Generator, across, generate_shown, shown, turned};
 use crate::grid::{ALPHA, BRICK, Box3, COLOUR_ONE, GLOW_ONE, VoxelGrid};
@@ -119,7 +119,7 @@ pub struct Picture {
     pub height: usize,
     /** RGB, 3 bytes a pixel. */
     pub rgb: Vec<u8>,
-    /** What the voxel hit looks like through the face hit (fcc's Look), 0 for none. */
+    /** What the voxel hit looks like through the face hit (lattice's Look), 0 for none. */
     pub looks: Vec<Look>,
     /** How far along its ray it was hit, lattice units (looking down, from just above the heights); infinite for none. */
     pub depth: Vec<f32>,
@@ -173,18 +173,16 @@ const OPAQUE: f64 = 1e-4;
 
 /**
  * What the site `cast` is in shows it, as light sees it: its pieces (as
- * seen along the ray, fcc's `facing`) and its medium of the rays they let
+ * seen along the ray, lattice's `facing`) and its medium of the rays they let
  * through, channel by channel: how much of the ray stops (in the channel
  * most gets through), what shows (linear, premultiplied), and what the
- * site glows to it; the rest goes on (`through`). A site stops its alpha
- * of a ray crossing its voxel: here, of one crossing `part` of the
- * voxel's chord (starting or ending in it) that stands for `crossing`
- * crossings (CROSSING along a row, 1 at any offset), `over` both.
+ * site glows to it; the rest goes on (`through`): of a ray going `path`
+ * in its voxel, so many crossings of it (lattice's `over`).
  */
-fn composite(cast: &mut Cast, grid: &VoxelGrid, part: f64, crossing: f64) -> (f64, [f64; 3], [f64; 3]) {
+fn composite(cast: &mut Cast, grid: &VoxelGrid, path: f64) -> (f64, [f64; 3], [f64; 3]) {
     let [x, y, z] = cast.ray.site;
     let (mut stops, mut shows, mut glow, mut faces) = ([0.0; 3], [0.0; 3], [0.0; 3], 0.0);
-    for k in fcc::facing(cast.ray.direction) {
+    for k in lattice::facing(cast.ray.direction) {
         let (pieces, medium, glows) = grid.light(x, y, z, k);
         for c in 0..3 {
             stops[c] += (pieces.0 as f64 + medium.0[c] as f64) / ALPHA as f64;
@@ -196,7 +194,7 @@ fn composite(cast: &mut Cast, grid: &VoxelGrid, part: f64, crossing: f64) -> (f6
     let before = cast.left();
     let (mut shown, mut glows) = ([0.0; 3], [0.0; 3]);
     for c in 0..3 {
-        let through = cast.through[c] * over(stops[c] / faces, part * crossing) / faces;
+        let through = cast.through[c] * over(stops[c] / faces, path) / faces;
         (shown[c], glows[c]) = (through * shows[c], through * glow[c]);
         cast.through[c] -= through * stops[c];
     }
@@ -290,12 +288,12 @@ impl Tiles {
                         None => return Step::Needs(key),
                     },
                 };
-                // Space whose voxels are all empty: a voxel is within 1 of its site on every axis.
+                // Space whose voxels are all empty: a voxel is the cube from its site to the next.
                 let empty = if ray.site[UP] > tile.top {
                     let b = self.tiling.tile(key);
                     let mut min = b.min;
                     min[UP] = tile.top + 1;
-                    leaves(ray, min.map(|v| v as f64), b.max.map(|v| (v - 1) as f64))
+                    leaves(ray, min.map(|v| v as f64), b.max.map(|v| v as f64))
                 } else {
                     match tile.grid.get_or_empty_brick(x, y, z) {
                         Some(_) if !tile.grid.shows_whole(x, y, z) => None,
@@ -308,7 +306,7 @@ impl Tiles {
                         }
                         None => {
                             let corner = [0, 1, 2].map(|i| tile.grid.min[i] + (ray.site[i] - tile.grid.min[i]).div_euclid(BRICK) * BRICK);
-                            leaves(ray, corner.map(|v| v as f64), corner.map(|v| (v + BRICK - 1) as f64))
+                            leaves(ray, corner.map(|v| v as f64), corner.map(|v| (v + BRICK) as f64))
                         }
                     }
                 };
@@ -327,15 +325,14 @@ impl Tiles {
  * `grid` before `end`, site by site, as `composite`: how far along it
  * enters each that stops some of it or glows, how much it stops, what
  * that shows and what it glows; till next to none of it gets through.
- * Each site counts as `crossing` crossings (CROSSING along a row).
  */
-pub fn composited(grid: &VoxelGrid, origin: [f64; 3], direction: [f64; 3], end: f64, crossing: f64) -> Vec<(f64, Seen)> {
+pub fn composited(grid: &VoxelGrid, origin: [f64; 3], direction: [f64; 3], end: f64) -> Vec<(f64, Seen)> {
     let mut cast = Cast::new(0, Ray::new(origin, direction, 0.0), end);
     let mut seen = Vec::new();
     while cast.ray.t <= end && cast.left() >= OPAQUE {
         let t = cast.ray.t;
-        let part = cast.ray.part(end);
-        let (stopped, shown, glow) = composite(&mut cast, grid, part, crossing);
+        let path = cast.ray.path(end);
+        let (stopped, shown, glow) = composite(&mut cast, grid, path);
         if stopped > 0.0 || glow != [0.0; 3] {
             seen.push((t, Seen { stopped, shown, glow }));
         }
@@ -346,8 +343,10 @@ pub fn composited(grid: &VoxelGrid, origin: [f64; 3], direction: [f64; 3], end: 
 
 /** What site `site` of `grid` (a level's units) shows a ray along `direction` crossing its voxel whole. */
 pub(crate) fn seen_whole(grid: &VoxelGrid, site: [i64; 3], direction: [f64; 3]) -> Seen {
-    let mut cast = Cast::new(0, Ray::new(site.map(|v| v as f64), direction, 0.0), 0.0);
-    let (stopped, shown, glow) = composite(&mut cast, grid, 1.0, 1.0);
+    // From its middle, half its chord.
+    let mut cast = Cast::new(0, Ray::new(site.map(|v| v as f64 + 0.5), direction, 0.0), 0.0);
+    let path = 2.0 * cast.ray.path(f64::INFINITY);
+    let (stopped, shown, glow) = composite(&mut cast, grid, path);
     Seen { stopped, shown, glow }
 }
 

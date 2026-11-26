@@ -4,10 +4,9 @@
 //! On a GPU, the engine's Painter draws its pictures into one of its own,
 //! which the window shows or a shot saves (gpu.rs).
 //!
-//! - chunks: cells of the lattice baked into chunks, their whole voxels
-//!   reliefs (Kind's Reliefs), or reliefs drawn flat, a picture a cell
-//!   (Flat, an experiment);
-//! - voxels: rays through the tiles' voxels, nothing baked.
+//! - flat: cells of the octree baked into chunks, each seen along one of
+//!   18 faces and drawn as a picture on a plane;
+//! - voxels: rays through the tiles' voxels, cubes, nothing baked.
 
 mod chunks;
 // The world packs its tiles for the voxels' GPU as it makes them.
@@ -26,20 +25,18 @@ use crate::world::{Wants, World};
 /** The engines, as --engine and the panel name them. */
 #[derive(Clone, Copy, PartialEq, Debug, clap::ValueEnum)]
 pub enum Kind {
-    /** Chunks of cells' reliefs. */
-    Reliefs,
-    /** Reliefs drawn flat, a picture a cell (an experiment). */
+    /** Cells baked into chunks, a picture each. */
     Flat,
     /** Rays through the tiles' voxels. */
     Voxels,
 }
 
 impl Kind {
-    pub const ALL: [(Kind, &str); 3] = [(Kind::Reliefs, "reliefs"), (Kind::Flat, "flat"), (Kind::Voxels, "voxels")];
+    pub const ALL: [(Kind, &str); 2] = [(Kind::Flat, "flat"), (Kind::Voxels, "voxels")];
 
     /**
      * Those that draw here: in a browser the voxels alone, as the chunks'
-     * compositor needs all of gpu.rs's FEATURES, and their bakery threads.
+     * compositor needs all of gpu.rs's FEATURES.
      */
     pub fn offered() -> impl Iterator<Item = (Kind, &'static str)> {
         Kind::ALL.into_iter().filter(|(kind, _)| !cfg!(target_arch = "wasm32") || *kind == Kind::Voxels)
@@ -48,8 +45,7 @@ impl Kind {
     /** An engine of this kind, drawing `world`. */
     pub fn make(self, world: &World) -> Box<dyn Engine> {
         match self {
-            Kind::Reliefs => Box::new(chunks::Chunks::new(world, false)),
-            Kind::Flat => Box::new(chunks::Chunks::new(world, true)),
+            Kind::Flat => Box::new(chunks::Chunks::new(world)),
             Kind::Voxels => Box::new(voxels::Voxels::default()),
         }
     }

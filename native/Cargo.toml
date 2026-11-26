@@ -5,12 +5,12 @@ edition = "2024"
 publish = false
 
 [dependencies]
-bake = { path = "../bake" }
 bytemuck = { version = "1.25", features = ["derive"] }
 egui = { version = "0.37", default-features = false, features = ["default_fonts"] }
 egui-wgpu = "0.37"
 egui-winit = { version = "0.37", default-features = false, features = ["wayland", "x11"] }
-fcc = { path = "../fcc" }
+bake = { path = "../bake" }
+lattice = { path = "../lattice" }
 light = { path = "../light" }
 worldgen = { path = "../worldgen" }
 winit = { version = "0.30.13", default-features = false, features = ["rwh_06", "wayland", "x11"] }

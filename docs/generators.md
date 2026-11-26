@@ -55,8 +55,9 @@ A world is **layers** of two kinds, drawn in `order`:
   as a function of position is, each with what its thing is made of.
   The framework asks for those its things may reach a box from,
   `reach` round it, and makes the thing of each it is given in it.
-  By default the points are the sites of the lattice N times coarser, N·FCC
-  (`lattice`; `make`).
+  By default the points are N·FCC, the points of N·Z³ whose coordinates
+  over N add up to an even number, as the worlds were made with when voxels
+  were FCC's (`lattice`; `make`).
   It knows nothing else of where they are:
   the forest's trees stand at `Points` ("Points") and its undergrowth on a square grid,
   the valley's towns, landmarks and steadings are `Claims` ("Claims"),
@@ -189,9 +190,12 @@ a world with a ground says so in its fields and anchors.
 
 ## Levels
 
-At level k the sites are those of the lattice scaled by 2^k,
-which is part of the lattice:
-site (x, y, z) of the level is at 2^k · (x, y, z).
+At level k the sites are those of the lattice scaled by 2^k:
+site (x, y, z) of the level is the cube 2^k · [x, x + 1) × [y, y + 1) × [z, z + 1),
+the eight of level k − 1 in it (an octree).
+Fields read a site at the level-0 site under its cube's middle
+(`sites::middle`; level 0 reads its cube at its least corner, so coarser
+levels are half a unit lower still), shapes at its cube's middle.
 What has to stay the same across levels is what a camera sees:
 how many rays get how far, and what they stop on.
 
@@ -202,11 +206,13 @@ how many rays get how far, and what they stop on.
   since a ray crossing it crosses it once; it looks up to half a site thicker.
   The planes of sites within half a site of its middle hold its middle's section,
   a box's and an ellipsoid's alike (`Sides`): two where it lies midway.
-  A box's or an ellipsoid's stops only 2t/3s of the rays along it,
+  A box's or an ellipsoid's stops only t/s of the rays along it,
   those entering by the four faces parallel to it (a site's `views`).
   Two or three, a rod or a speck: the sites near it, kept with a chance
-  that stops as many rays as it does on average over directions
-  (Cauchy: a convex body's mean shadow is a quarter of its area).
+  that stops as many rays along the axes as it does:
+  its shadow along them, a box's a sixth of its area,
+  any other's taken as a quarter
+  (Cauchy: a convex body's mean shadow over directions; a ball's along any).
   A speck's chance is shared by the sites that hold its centre between them,
   each as near it is (`around` in `shapes.rs`),
   so it keeps its place at every level, as a lamp's light must.
@@ -226,16 +232,12 @@ how many rays get how far, and what they stop on.
   then coarsened.
   Its population keeps it (`Measured`), the ones asked for last:
   every box a thing reaches asks.
-  Seen along an axis, a voxel is a square turned 45° round its column,
-  twice a column's area:
-  the even columns' voxels cover the plane once, the odd ones' once more,
-  so a ray along an axis meets the voxels of two neighbouring columns (`pairs`).
+  Seen along an axis, a voxel is a square, its column's:
+  a ray along an axis meets the voxels of one column (`columns`).
   A ray crossing a coarse site's cell is stopped
-  as often as the pairs holding a fine site of the cell hold one of the thing,
-  on average over the axes.
-  Counted by columns, a sheet one site thick stopped half what it does,
-  and sparse content a third less
-  (0.18 against 0.27, traced through the voxels, in a cell four sites wide).
+  as often as the columns of the cell hold a fine site of the thing,
+  on average over the axes
+  (sparse content 0.276 against 0.27, traced through the voxels, in a cell four sites wide).
   Each cell is drawn with its share, as alpha (see "Kinds and things").
   Shown as often as covered, a house's walls come out ragged;
   all held to one threshold, each house came out fatter or thinner by a site,
@@ -278,7 +280,7 @@ how many rays get how far, and what they stop on.
   a medium as dense as their things, by the theory of Boolean models
   (extinction = things per volume · their mean shadow).
   `Shadows` measures it from sample things drawn alone at a level,
-  their shadows by pairs of columns, as above,
+  their shadows by columns, as above,
   slab by slab across an axis, each slab a medium of its own:
   seen across, what the slab adds to the shadow of the rest of the thing,
   from either side, as a tree's slabs overlap
@@ -330,14 +332,14 @@ how many rays get how far, and what they stop on.
   so a thing at a dithered edge may stand a site off what the spans show.
 - **Faces.** A field's solid spans are where they are at every level:
   a site holds what its part of them stops along each direction,
-  the share of its voxel's chords along a face's direction that meet them
+  the share of its voxel's chords along each axis that meet them
   (`cover` in `drawables.rs`, `slabs` in `shapes.rs`),
   and is whole only if they hold all of its voxel.
   A line's spans cover its sites together:
   a face across the line sees the kind its rays meet first.
-  No plane across an axis parts the lattice's layers,
-  so a flat ground's top sites are held in part at every level, level 0 too,
-  shown by coins (fcc's `shows_whole`): the ground is pitted, a site deep.
+  A flat ground on a plane of a level's cubes' faces is whole;
+  off them its top sites are held in part,
+  shown by coins (lattice's `shows_whole`): the ground is pitted, a site deep.
   A paint lies on what is there, and past it only where it covers more:
   a field painting another's ground paints all of its top sites.
   A medium's span is in every site it reaches too, by the same law:
@@ -347,15 +349,10 @@ how many rays get how far, and what they stop on.
   as a ground shows only by its top:
   so a thin medium shows on its ground from above
   as often as it stops a ray down, at every level.
-  Boxes keep the sites in [min, max) along each axis.
-  On a plane of a level's sites (y = 0 is one at every level)
-  half the lines across a face have a site on it,
-  all kept at a bottom face and dropped at a top one,
-  so they would sink half a site, and more each level.
-  A site on a face counts as above it with the chance ½ + 1/(2s)
-  by a hash of its position and the axis (`Sides`):
-  always at level 0, about half the time far away,
-  so on average a face is where level 0 has it.
+  Boxes keep the points in [min, max) along each axis, read at the cubes' middles.
+  A site whose middle is on a face counts as above it half the time,
+  by a hash of its position and the axis (`Sides`),
+  so on average a face is where it is, however it lies across the cubes.
   A box one site thick keeps its bottom face whole, as at level 0,
   as halves of two faces would let rays through.
   Faces off those planes still round to the sites, up to half a site either way:
@@ -364,7 +361,7 @@ how many rays get how far, and what they stop on.
 Build solids as one shape, not stacks of slices:
 a stack of discs a unit thick, each grown to a site, draws its outline, not its shape.
 And build what a sheet covers of the sheet's kind, then paint what shows:
-columns of sites step over a sheet thinner than two sites to what is under it,
+a sheet thinner than a site shows from the side what is under it,
 at whatever level it is measured.
 A roof is solid down to its eaves, its gables walls only at its ends
 (`gable_ends` in `town.rs`), so it is roof from above, not the walls under it.
@@ -678,7 +675,7 @@ and it reuses the forest's stone and the town's thatch.
 A kind's type (`kind_type`) is its class,
 by which `look`'s stats count what rays see.
 A kind marked `walk_through` is one a walking body goes through
-(plants, water; see `fcc/src/walk.rs`), the rest it stands on;
+(plants, water; see `lattice/src/walk.rs`), the rest it stands on;
 so ground and what stands on it are different kinds,
 even of one colour (the moor's `heather` and `heatherSprigs`).
 A kind marked `glows` gives light of its colour, as lamps do
@@ -711,7 +708,7 @@ those that meet the sea's top in the site beside it too.
 So a coarse site of a crown in mist holds both, each as it is.
 The pieces show as grain:
 the site's look a whole voxel as often as the site stops rays, else nothing
-(`fcc::whole_or_none`).
+(`lattice::whole_or_none`).
 A host that draws alpha shows a medium alone as see-through as it is.
 Drawn see-through, leaves are smoke; as grain, mist is snow.
 So a lamp too small for a coarse site
@@ -1037,9 +1034,8 @@ and without them rays slipped in at a cliff's corners.
   (the fields' crops, the forest's columns, which hold its heights too),
   are read where each line is as well:
   even where their edges are irregular, aliased where they follow the sites' grid,
-  as the town's square's checker of metres did (all light or all dark at level 3,
-  where a flat ground shows the top sites of every other column from above:
-  its flags are light or dark at random now).
+  as the town's square's checker of metres did at level 3
+  (its flags are light or dark at random now).
   Over the forest at level 6 such reads of its floor came within 0.042 (seed 42)
   of level 0, likely by chance: too close to the far check's tolerance to add it.
 - **Cells hold what they look like** (begun; the steps left are in `docs/todo.md`).
@@ -1062,13 +1058,9 @@ and without them rays slipped in at a cliff's corners.
   things in a site stop as if apart, but a paint, which lies on what is there.
   A field's solid spans cover their sites so ("Faces" in "Levels").
   The contract holds each cell to what is in it `FINER_BY` levels finer
-  (`checks::cells`), along each of the 12 directions, by the rows of the finer level's sites in it,
-  on average over a stratum's cells.
-  A row's ray reads its own row's sites, not the teeth of the rows beside
-  (`CROSSING` stands for them, on average):
-  a lone whole voxel counts for two thirds of its shadow,
-  a sheet one layer thick across a direction for half of the rays, where it stops three quarters.
-  Rays along the rows of a lattice finer still would meet both.
+  (`checks::cells`), along each of the 6 directions, by the rows of the finer level's sites in it,
+  on average over a stratum's cells:
+  along an axis a ray at any offset crosses its row's sites as the row's middle does.
   Where a cell is a whole site or none
   and what is in it stops a third of the rays along it, or more,
   it breaks the contract from level 1,
@@ -1083,9 +1075,9 @@ and without them rays slipped in at a cliff's corners.
   What costs is testing each line against each shape in a site filled in part,
   not keeping where in the site pieces lie:
   keeping none was barely faster, and pieces drawn apart leaked rays where they met.
-  A ray along no direction of the lattice reads a site's nearest directions alike:
-  straight down, the four up, so a wall, along which straight down is, shows half as across it;
-  the cells' check reads along the lattice's only.
+  A ray along no axis reads the faces turned most against it alike:
+  along a diagonal, two, so a wall shows half as across it;
+  the cells' check reads along the axes only.
 - **Things of one band can't see each other.** Bands order what decides where,
   but two populations of one scale ("no tree on a boulder") still can't
   exclude each other.

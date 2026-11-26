@@ -35,12 +35,8 @@ Numbers are for the forest at 1280×800, as measured when written.
   against 0.002 to 0.02 at level 0, and the tower's plaster 0.03 to 0.04,
   against none.
   Measured far forms count what a thing hides along each axis
-  by pairs of neighbouring columns, as rays meet voxels (`pairs` in `generator/forms.rs`);
-  counted by columns, walls and rails hid a half to two thirds as much,
-  which offset this: since, at level 4 against level 2,
-  rays get through about 0.005 less often around houses
-  and 0.01 less around the railway, on average.
-  An opacity per line of nearest neighbours
+  by columns, as rays along an axis meet cubes (`columns` in `generator/forms.rs`).
+  On the FCC lattice, an opacity per line of nearest neighbours
   (a share per pair of a voxel's opposite faces, measured as rays meet columns along it,
   each ray taking the share of the line it enters a voxel across)
   was tried and not kept
@@ -59,9 +55,9 @@ Numbers are for the forest at 1280×800, as measured when written.
   What would: a voxel holding where in it its content lies,
   between two planes (contours, as in Laine and Karras' sparse voxel octrees),
   so that a wall is thin from every side and need not grow to a site.
-  A site's pieces now may stop and glow unlike along each of the 12 directions
-  (`VoxelGrid`'s `views`), so far only for a box's or an ellipsoid's sheet;
-  straight down is none of them ("Cells hold what they look like", below).
+  A site's pieces now may stop and glow unlike along each of the 6 directions
+  (`VoxelGrid`'s `views`), so far only for a box's or an ellipsoid's sheet
+  ("Cells hold what they look like", below).
   Still to do: rods, measured far forms.
 - **A coarse site takes a share of a solid a site past it.**
   A box 6 units high on y = 0 gives the site 64 units up a share of 1 in 255 at level 6;
@@ -133,7 +129,7 @@ Numbers are for the forest at 1280×800, as measured when written.
       where it is beside it: a little less is stopped at level 1 (the valley's fields).
   - Hosts: the levels they ask for, the scale a body walks at.
     Seen from near, a level is sharp only where a shape is several sites thick.
-  - Hosts show a site held in part whole or not, by a coin of its site (fcc's `shows_whole`),
+  - Hosts show a site held in part whole or not, by a coin of its site (lattice's `shows_whole`),
     so from near it is pitted (a flat ground's top, a site deep),
     and light, which sees its share, lights what shows behind it as if through it.
     Tried instead:
@@ -152,7 +148,7 @@ Numbers are for the forest at 1280×800, as measured when written.
   and `About` is a band around one plan.
   Simpler would be a field of `Column`s on a plan knowing where it is,
   with only what varies by column (water, mist, bridges) declared.
-- **`VoxelGrid::get` gives whole voxels alone, `fcc::Grid::get` all hosts are handed**:
+- **`VoxelGrid::get` gives whole voxels alone, `lattice::Grid::get` all hosts are handed**:
   one name, two meanings. Most callers of the first are tests asking for a whole voxel.
 - **Whole sites are still put one by one.**
   Under the surface nearly every put is a whole site of the ground's fill,
@@ -349,8 +345,11 @@ Numbers are for the forest at 1280×800, as measured when written.
   worldgen's, counted ("Cost" in `docs/checks.md`),
   goes mostly to the trees at levels 0 to 2
   and to the canopy from level 4 (`Rooms::owner` making the trees near).
-- **Four of the cheese's tiles are over the cost budget**
-  (`Known::OverBudget`), at levels 6 and 7 at the spawn and in the mine:
+- **Most of the cheese's tiles are over the cost budget**
+  (`Known::OverBudget`), at the spawn and in the mine:
+  cubes hold twice the sites FCC's did in a tile,
+  so at levels 0 to 5 the cheese costs up to 1.7 times its budget;
+  at levels 6 and 7:
   at level 7 a tile holds a few hundred thousand holes,
   each a shape, most of them a site or two
   ("Far forms for what fills space", below);
@@ -401,6 +400,8 @@ Numbers are for the forest at 1280×800, as measured when written.
   The learned town's settlements are such boxes too (2.5 %),
   but their streets' own direction (2 %) hides them from the check.
   Square noise (`ValueNoise`, `Fbm`) draws under 1 %, too little to tell.
+  On cubes the cheese's holes around its spawn line up too, as they did not on FCC:
+  −1.5 %, pairs along the diagonals parting less often than along the axes.
   `mountains.rs` turns its noise by 37° (`turned`),
   which leaves its four-fold harmonic mostly on the diagonals;
   22.6°, (12, 5)/13, would leave none there.
@@ -460,77 +461,39 @@ Numbers are for the forest at 1280×800, as measured when written.
 
 ## Native
 
+- **The flat engine's pictures fall by the order chunks are drawn in**
+  (architecture.md, section 3).
+  Where neighbours' pictures overlap at a depth, the one drawn last shows,
+  and that order is the order chunks came in and found room in the buffers:
+  the same view drawn twice differs in about a pixel in forty
+  (`few_differ` in `native/src/engine/chunks.rs`).
+  A picture's own bricks could win over a neighbour's enlarged edge.
+- **A surface along a flat face's axis is smeared.**
+  Seen along an edge face, ground and walls along the axis
+  are a row or two of columns whose pillars run through the cell,
+  and the picture's plane cannot follow them:
+  in the city, looking along a street, the pavement at the sides of the screen
+  bends, and ledges show a voxel or two off.
+  Near the eye a pixel or two of sky shows between pictures on a slope.
+- **Hiding cells on the CPU saves the flat engine little**
+  (`Hiding` in `renderer.rs`):
+  of the forest from its spawn it hid a few dozen of fourteen thousand chunks,
+  and the GPU found a third of those it hid showing after all.
+
 - **The native frontend is missing pieces.**
   Its camera is f64, not fixed point,
-  and the GPU gets chunks' places and the eye in f32 and subtracts them there
-  (`GpuRecord`, `FaceView`; the voxels engine's eye too):
-  far from the origin they lose their fraction before they meet.
-  Its compositor needs indirect draws counted on the GPU
-  (`MULTI_DRAW_INDIRECT_COUNT`), and so Vulkan:
-  Metal and GL lack them, and on DX12 wgpu's leave out the first vertex
-  a flat picture's cluster comes as, and the first instance a tile does (`BACKENDS`).
-  Its frames are bound by the GPU (`--stroll`):
-  culling the clusters in view costs about a third of a frame,
-  drawing those that show most of the rest.
-  The first phase reads every cluster only to find those that showed;
-  a list of them, kept from the last frame, would spare that.
-  The pyramid of farthest depths is made over all its texture,
-  each level a power of two: at 1280×800, twice the texels the screen needs.
+  and the GPU gets the eye in f32:
+  far from the origin it loses its fraction.
   Walking in the window for minutes, a frame sometimes takes seconds
   until the driver resets the GPU (seen on Intel UHD with Mesa);
   the window then makes its device again (`window.rs`).
   Why is open: the same views and paths, drawn headless, take milliseconds.
-- **Native's cells could be simpler and cheaper**
-  (section 1 of `docs/architecture.md`).
-  Nearly half the cells baked come back empty:
-  they hold voxels (`Level::meets`) and are not buried by whole bricks
-  (`Level::buried`), but hold none a ray of their face can enter.
-  From the eye about one in seven of a frame's chunks shows
-  (the valley's spawn, a colour per chunk);
-  the rays that hide cells before they are baked (`Hiding`)
-  leave about two in three of them at the spawns, in relief,
-  four in five drawn flat, whose pictures reach past their cells.
-  Of those they hide, about one in seven the GPU's probes find showing,
-  most because a probe's box shows where its voxels would not;
-  the first frame takes up to a third longer, waiting for probes.
-  The rays are cast for a pick, from where the eye was:
-  what the eye comes to see as it moves within it shows a few frames late.
-  A face picked anew, every few units moved,
-  takes the renderer's thread tens of milliseconds:
-  its cells of the three finest levels, near the eye, are nearly all new,
-  each asked whether it holds voxels (`may_hold`) and whether it is hidden,
-  and every ray goes on to the new cells far off.
-  Flying fast, the eye leaves a pick before it is rendered,
-  and what is near shows holes till it slows:
-  no coarser level stands in for a finer one not baked.
-  Crossing a tile that holds nothing at once
-  made the rays no cheaper, measured.
-  Each such pick swaps a few thousand chunks in the compositor,
-  a thousand a frame (`CHANGES`), each through four sorted free lists.
 - **Native's world lists all it is asked for every frame** (`World::update`),
   thousands of tiles when flying fast, and frees what comes far:
   a tile is made with all those above and below it (`made_with`),
   in the valley kilometres of air, hundreds of tiles a frame.
   Leaving the queue alone while asked the same took exceptions
   (a tile dropped since, bricks to light) for milliseconds no frame was short of.
-- **In relief, a shot of the moor did not complete in minutes on lavapipe**
-  (`--engine reliefs --world moor --seed 1 --look 30,-10 --size 320x200 --shot`),
-  though the chunks' tests complete it at a shorter distance. Not looked into.
-- **Flat, the valley looking `--look 30,-10` never completes** (`--shot`):
-  the world's threads idle, the renderer's and the main one busy.
-  Mist hides nothing: the GPU's depths have none, so it would ask for it all.
-  A server handing each player only the cells it may see
-  would need, for each probe a client says shows,
-  the pixel `sees` found, to check its ray through the voxels itself
-  (as `Hiding` casts them).
-  Cells straddling where a face's levels meet are drawn at both.
-  Each render tests every cell a face composes against the screen,
-  though a face keeps its cells picked (`Lod::pick`);
-  the render that picks them anew, every few units moved,
-  takes a few times longer.
-  `surface` still finds a cell's cut faces, which `cell_relief` drops.
-  Detail sets Q = max(4, ⌈2·detail⌉), so below 2 it changes nothing;
-  Q itself, a whole number, would say what it does.
 - **Native's threads take more work together than one alone**:
   completing the valley's first view, lit, four take about a third more than one.
   Little of it is work done twice, now that they share the world
@@ -561,41 +524,14 @@ Numbers are for the forest at 1280×800, as measured when written.
   Much of their work is then generating, the tiles the light reads
   ([light.md](light.md), "In native, and what it costs").
   Its tiles come in time, made before the bricks are lit.
-- **Native's medium costs a fragment per slab a ray crosses**
-  (architecture.md, "See-through"), as far as the view goes:
-  pictures laid far to near, nothing behind what all but stops a ray is left out.
-  Only media are (`KindDef::medium`): the moor's mist, the fog's (`world=fog`),
-  where a pixel takes some 10 slabs on average and up to 40,
+- **Native's media** (`KindDef::medium`), added up along each ray
+  (architecture.md, section 2): the moor's mist, the fog's (`world=fog`)
   and the valley's sea (`mountains.rs`).
   - The sea's top is a medium of its own, so that where it ends shows;
     it mirrors no sky.
     A kind's shine, kept by sites as glow is,
     would let a ray take the sky's colour where shine changes along it.
-    Not looked at in the chunks engines, whose slabs blur where a medium ends.
     Ponds, the moor's water and wells are still whole voxels.
-  - In the chunks engines the sea from above still shows its slabs
-    (`--camera=-38111,3719,-7706 --look=-58,-29 --distance 40000`):
-    bands across a face whose axis is tilted, where it stands over the horizon
-    as far as half a slab is deep; and it lies over the shore's trees, at the far side of an island:
-    a picture's depth is the least for its whole slab (`veil_vertex`),
-    by distance along the axis, or drawn flat the least ahead in its box.
-    A depth per pixel, where its ray enters the slab, hid the medium behind ground
-    it was before: in reliefs along a band past each seam of a tilted face, not understood;
-    drawn flat, where the floor's picture stands before the floor.
-  - A chunk still reads a column or two around its cell (`chunk_reads`),
-    where its medium's neighbours were, which no picture holds now:
-    `Lod::grid_reach` and its test are fitted to that width.
-  - A pixel reads up to `TAPS` columns four times over for each half of a slab,
-    and pictures overlap: the moor's frame, drawn flat, takes a third longer
-    on Mesa's software GPU; on a real one, not measured.
-    Cells deeper than 32 voxels (`--shift` over 3) have more columns along a ray than `TAPS`.
-  - Where neighbours' pictures overlap, their order shows, by a level or two of colour,
-    and the GPU lists them in no set order (`order_veils`):
-    two tests that held pictures to be the same allow as much now (`chunks.rs`).
-  - The chunks engines take a medium's alpha for every channel,
-    their pictures holding one optical depth a column;
-    the voxels engine, the light and picture.rs's rays take each channel's own
-    (architecture.md, "Native: another engine").
   - Lit (computed), the sea from above is darker at the finer levels,
     a ring where they meet (`seed=12345&world=valley&camera=-51216,3251,-9490&look=-473,-90`
     with `--light 3.5,1,0`); shaded, it is not.
@@ -608,20 +544,11 @@ Numbers are for the forest at 1280×800, as measured when written.
     as it did before: not looked into.
   - At the levels whose sites are a few pixels wide, the sea shows rings (the valley, from 600 m up):
     a ray for every 4 × 4 pixels takes its medium from a lattice of see-through sites as fine.
-  - Most of what a fragment costs is reading its four columns from storage:
-    two columns an item, or the pictures in a texture the GPU filters,
-    would read half as often.
-  - Its deep slabs (`Lod::for_medium`) show mist on the ground above and below it
-    in faces with tilted axes: a V at their seams near the horizon,
-    and a column of smoke, as wide as a slab is deep, cut across at a seam.
-    Not looked at since a pixel takes its slab's halves along its ray.
-  - The medium starts at the first half slab past the near plane:
-    right by the eye, mist is a little thin.
   - A site's pieces, where shown, hide its medium and what is behind:
     right on average, but a coarse site of a crown in mist
     is a whole voxel or mist, never the crown's grain seen through mist.
 - **Native's voxels show what rays ask for a frame or two late**
-  (architecture.md, "Native: another engine"):
+  (architecture.md, section 2):
   turning, what comes into view shows coarser first,
   as every ray past the window's edge does,
   till its tiles are made and its bricks placed, and lit.
@@ -655,10 +582,10 @@ Numbers are for the forest at 1280×800, as measured when written.
   those far from the eye are made and dropped at once,
   the rest held, most of them empty, each with its indexes (`Tile::new`).
   A host's tiles as they are made, a box each, would hold and index them once;
-  `fcc`'s `Tiles` and the windows take cubes.
+  `lattice`'s `Tiles` and the windows take cubes.
 - **A window looks through all its level's tiles at every step** (`retarget`),
   for those gone and those new,
-  though a level is handed over in blocks shared with the last (fcc's `Blocks`):
+  though a level is handed over in blocks shared with the last (lattice's `Blocks`):
   on the windows' thread, by the tiles held, not by what changed.
 - **A world lit only later makes its tiles twice.**
   Shaded, a tile's sites are not kept (`Queue`'s `lit`):
@@ -674,7 +601,7 @@ Numbers are for the forest at 1280×800, as measured when written.
   and a step costs its reads one after another (a brick's slot, then its site),
   not its arithmetic.
   On Intel's GPU (Mesa) the shader runs 8 pixels a thread, not 16: too many registers.
-  Tried, and no better: stepping by increments;
+  Tried on the FCC lattice, and no better: stepping by increments;
   cells of 128·FCC (a window's torus is 4 of them a side,
   so cells a window apart share a count: the sky the ground's);
   each empty voxel saying how clear around it is
@@ -691,7 +618,7 @@ Numbers are for the forest at 1280×800, as measured when written.
     (`Ball::about` against its radius), not each in turn, may do better.
   - Walking, frames come every 33 ms:
     CPU and GPU together take a little more than the 16.7 ms
-    the compositor paces frames by.
+    the window paces frames by.
   - A ball's step counts the bricks it gains and loses in the cells around them (`set`),
     by memory, not work: some 10 ms while the world's threads work.
     On the windows' thread that is no frame's time,
@@ -704,72 +631,10 @@ Numbers are for the forest at 1280×800, as measured when written.
   - A site's faces see three sights beside its own look (`SIGHTS`):
     with more, far off at coarse levels, the rest see its own.
     worldgen holds sights already (`Sights` in `grid.rs`),
-    `fcc`'s `Grid` a look a face, which the engine packs again:
+    `lattice`'s `Grid` a look a face, which the engine packs again:
     a grid holding sights would spare that, and say how many there may be.
   - Shots and tests wait for the windows a step at a time (`STEP` tiles),
     a whole picture drawn each, so the voxels' GPU tests take twice as long.
-- **`culling_on_the_gpu_leaves_the_picture_unchanged` failed on an Intel UHD** (Mesa),
-  drawn flat, every time: the forest from its spawn.
-  Likely by ties in depth drawn in no set order, fixed since:
-  lavapipe fails there too with the draws reversed. Untried on Intel.
-- **Native's flat pictures** (`--engine flat`, architecture.md, section 1).
-  - Their depth is by w, ahead along the view (`flat_depth`),
-    the other engines' by distance from the eye (`depth_of`),
-    so culling and the pictures of medium ask which the frame draws.
-  - Their runs are cut to their face's rays by clip planes,
-    which cost Intel's GPU about as much as all else they do
-    (the valley's frame 5.2 ms, 3.6 without).
-    Uncut, faces' pictures overlap past their seams, and tie there (below, "A shot may differ").
-  - Neighbours in a layer of cells often lie on one plane
-    (cells of one column always: `STEEP`),
-    and enlarged (`Flat`), one shows over much of the other's picture
-    where the ground runs along the axis, its pillars through the cell:
-    they tie, and the one drawn last shows.
-- **Native's chunk engines while the eye moves.**
-  - Their renderer composes a frame behind (`chunks.rs`),
-    so `--stroll` counts nearly every frame as one whose content is still coming:
-    it no longer tells holes from that;
-    `--shots` does, replaying, from a walk the window recorded (`--record`).
-  - Turning leaves holes: a face out of view has no pick,
-    and one coming into view is baked from nothing,
-    tens of thousands of chunks, seconds of the bakers' work.
-    Picking faces out of view too would add to a queue
-    that walking already keeps from emptying.
-    Drawing coarser cells where finer ones are missing (from the near plane on)
-    filled the holes, but drawn flat, a coarse picture seen that near
-    stands into the sky.
-  - A pick moved composes its every chunk again, on the renderer's thread,
-    and thousands of chunks come and go at once,
-    most of them the finest cells', a voxel or two each:
-    the compositor spreads them over frames (`CHANGES`),
-    a few microseconds each on the main thread.
-    Fewer, larger chunks near the eye
-    (a chunk holding a cell's finer cells' pictures too) would cost less.
-  - A shot may differ from run to run (flat, the valley):
-    where depths tie exactly, the one drawn last shows,
-    in the clusters' order: the order chunks came in, which timing decides.
-- **The chunks' occlusion steps rays half a voxel at a time** (`stop` in `renderer.rs`),
-  so it can miss a voxel's corner.
-  Exact rays across the voxels are `fcc::ray`'s;
-  where the level changes, a ray starts anew there.
-- **Native's reliefs.**
-  - Thin things seen at a slant break at the default detail:
-    the city's road markings into combs, whole at twice the detail.
-  - Tiles hold their empty columns: about half of those uploaded.
-  - A few pixels show what is under the ground at cells' edges
-    (7 in the forest at `seed=12345&camera=-14,40,-200&look=-25,6`):
-    columns' cells are not their voxels' outlines.
-  - Where pillars of two cells meet a voxel at one site,
-    the one whose front is nearer it shows (`shown` in `compositor.wgsl`);
-    as near, they tie, and the one drawn last shows, its front's colour.
-  - `chunk_reads` reads a cell deeper, for the solid behind a relief.
-- **The native compositor's buffers stop at the device's limit.**
-  `Arena::grow` caps a buffer at what the device allows
-  (128 MB on lavapipe), and `allocate` then hands out room past it:
-  wgpu panics in `Compositor::prepare`
-  (the city at 1280×660 at detail 27 did, before `GRID_REACH`;
-  the forest at its defaults does, `seed=42&world=forest&look=200,10`).
-  Past the limit it could drop the farthest chunks, or split the buffer.
 
 ## Browsers
 
@@ -780,14 +645,6 @@ Numbers are for the forest at 1280×800, as measured when written.
   and in 3.8 on the main thread alone, as before there were threads.
   Not looked into: they share std's allocator, whose lock spins in WebAssembly,
   and the GPU, in software, takes cores too.
-- **The chunks engine's thread that draws takes its renderer's lock**
-  (`native/src/engine/chunks.rs`'s mailbox), as `native/src/threads.rs` says it must not:
-  harmless natively, where alone the engine runs.
-  Its renderer could take a `Post` as the voxels engine's `Keeper` does.
-- **A browser draws by the voxels engine alone.**
-  The chunks' compositor needs indirect draws counted on the GPU
-  and depth tested before a shader that writes it,
-  which WebGPU lacks ("The native frontend is missing pieces", above).
 - **A device lost in a browser can leave the page blank.**
   The window makes its GPU anew (`native/src/window.rs`),
   but Chromium may give that page no adapter after a GPU crash,
@@ -847,10 +704,6 @@ Numbers are for the forest at 1280×800, as measured when written.
     and changes with most commits to the worlds;
     a baseline per place and level would do for a test with a quarter's slack.
   - `docs/generators.md` holds the worlds beside the engine ("Composing").
-  - `native/` is no longer only native, and `bake/` serves one engine of it,
-    the chunks', which a browser cannot draw.
-  - Tests at the end of `lod.rs` are a third of it;
-    `generator/tests.rs` shows the way.
 
 ## Ideas
 
@@ -883,10 +736,7 @@ Numbers are for the forest at 1280×800, as measured when written.
   Lit (`--light 1,1,0`), Sponza's atrium is all but black; not looked into.
 - Light along more directions at coarser levels, as radiance cascades do:
   near, light wants fine places and few directions; far, coarse places and many.
-  Light keeps 12 at every level, too few far off (a lamp's lobes, blurred shadows).
-- The eye (`native/src/eye.rs`) in the chunks engines too:
-  their pillars hold light baked as a byte a channel;
-  held as RGB9E5, the compositor could show it as the voxels do.
+  Light keeps 18 at every level, too few far off (blurred shadows).
 - The eye at night: colours fading and bluer (Purkinje's shift),
   so that a night shown brighter still looks like night.
 - WGSL formatted in `pnpm lint`, as rustfmt does the Rust.
@@ -928,7 +778,7 @@ Numbers are for the forest at 1280×800, as measured when written.
   Things about a site wide are where it is least sure:
   drawn, their shadow lies where they are; counted, spread over their cell.
 - Lay out towns at any angle?
-  Walls along the lattice's axes look crisp on FCC;
+  Walls along the lattice's axes look crisp;
   at other angles they jag.
   But every town and the city runs north–south and east–west,
   which at the scale of a layout reads as a grid.
@@ -940,11 +790,11 @@ Numbers are for the forest at 1280×800, as measured when written.
   they are lattice units, and the forest's unit is 0.125 m.
 - Show the forest to 22 km again: one level more (`GRID_LEVELS`).
 - Learn a world from examples instead of the split grammar.
-  Two models in lab draw any box alone, flat or on the FCC lattice.
-  The masked model (`lab/src/masked.rs`, `masked_fcc.rs`)
+  Two models in lab draw any box alone, flat.
+  The masked model (`lab/src/masked.rs`)
   learns the statistics and new layouts,
   but breaks long thin things (lanes, tunnels) into pieces.
-  Synthesis by coordinates (`lab/src/exemplar.rs`, `exemplar_fcc.rs`)
+  Synthesis by coordinates (`lab/src/exemplar.rs`)
   copies pieces of the examples, so it keeps lanes whole,
   but cuts houses where pieces of two towns meet.
   The critic (`lab/src/critic.rs`) says what tells them from real maps
@@ -960,11 +810,7 @@ Numbers are for the forest at 1280×800, as measured when written.
   not each alone (cells drawn in an order that keeps neighbours apart early);
   a plan composed for a world worth walking through
   (landmarks, views, contrasts), not an average one.
-- The critic judges flat maps only;
-  3D scenes are still scored by pooled statistics (`lab/src/fcc_stats.rs`).
-  Its windows as volumes would judge the FCC models too.
-- Join lab's cubic and FCC samplers with one lattice type
-  (sites, neighbours, parents): each pair now repeats its box bookkeeping.
+- The critic judges flat maps only.
 
 Composing generators (section "Composing" of `docs/generators.md`), untried:
 
@@ -1026,5 +872,3 @@ Composing generators (section "Composing" of `docs/generators.md`), untried:
   constraint solving stays local and needs no backtracking across cells.
   Lab's WFC sampler did so on squares (`lab/src/synth.rs` at 114c077),
   in rounds: corners from their four parents, then edges, then insides.
-  On the FCC lattice, a fine site in six coarse cells, two or one
-  would be a corner, an edge or an inside.

@@ -1,5 +1,5 @@
 use super::*;
-use fcc::light::colour;
+use lattice::light::colour;
 use worldgen::generator::{Field, Generator, KindDef, Layer, Node, Op, Population, SOLID, cuboid};
 
 const STONE: u8 = 0;
@@ -44,9 +44,8 @@ fn world_with(
     World { generator: Generator { kinds, seed: 1, layers }, spawn: [0; 3], heights: Some((-64, 1024)), points: Vec::new() }
 }
 
-/** A site on top of ground below y = 0: at y = −1, x + z odd. */
+/** A site on top of ground below y = 0: at y = −1. */
 fn ground(x: i64, z: i64) -> [i64; 3] {
-    assert!((x + z) % 2 != 0, "({x}, {z}) is not on top");
     [x, -1, z]
 }
 
@@ -163,7 +162,7 @@ fn scenes() -> Vec<Scene> {
             day,
             [-9, -1, 3, 17, 29, 41].map(|x| ground(x, 0)).to_vec(),
             4096,
-            0.2,
+            0.3,
         ),
         scene(
             "lamp",
@@ -171,11 +170,11 @@ fn scenes() -> Vec<Scene> {
             night,
             vec![ground(1, 0), ground(16, 7), ground(33, 0)],
             1 << 16,
-            0.75,
+            0.2,
         ),
     ];
     // A roof 2 sites thick and 128 units wide at y = 24, turned about y, probed across it: the same light at every turn.
-    for (turn, bound) in [(0.0, 0.7), (22.5, 0.35), (45.0, 0.4)] {
+    for (turn, bound) in [(0.0, 0.15), (22.5, 0.15), (45.0, 0.3)] {
         let (sin, cos) = f64::to_radians(turn).sin_cos();
         let roof = world(&[], move |x, y, z, s| {
             let (u, v) = (cos * x as f64 + sin * z as f64, cos * z as f64 - sin * x as f64);
@@ -192,12 +191,12 @@ fn scenes() -> Vec<Scene> {
         y < 0 || shell && (!inside || wall)
     });
     let probes = [-48.0, -24.0, 32.0, 44.0, 56.0].map(|x| ground_near(x, 0.0)).to_vec();
-    scenes.push(scene("yard, past a wall", yard, sky, probes, 1 << 16, 1.1));
+    scenes.push(scene("yard, past a wall", yard, sky, probes, 1 << 16, 1.25));
     // A tunnel 40 wide and high through a hill 384 long, under a roof 16 thick at every level, thinner than the coarse
     // levels' sites: probed along its floor, from its middle out past a portal. The sun is side on: none of its light comes in.
     let tunnel = world(&[], |x, y, z, _| y < 0 || z.abs() < 192 && y < 56 && !(x.abs() < 20 && y < 40));
     let probes = [0.0, 96.0, 160.0, 224.0].map(|z| ground_near(0.0, z)).to_vec();
-    scenes.push(scene("tunnel under a thin roof", tunnel, day, probes, 1 << 16, 4.0));
+    scenes.push(scene("tunnel under a thin roof", tunnel, day, probes, 1 << 16, 0.65));
     // Blocks the lamps' size strewn over the ground, two to a square 8 wide, from 24 to 40 up: whole voxels near, a
     // share of a site each far, stopping about two thirds of the sky's light.
     let strewn = |k: i64, v: i64| (worldgen::noise::hash(k as u64, v, 0, 0) % 1000) as f64 / 1000.0;
@@ -219,15 +218,15 @@ fn scenes() -> Vec<Scene> {
         y < 0 || within(x) && within(z) && (0..48 + s).contains(&y) && (wall(x) || wall(z) || y >= 48)
     });
     let probes = vec![ground(1, 0), ground(16, 7), ground(29, 0), ground(28, 27)];
-    scenes.push(scene("white room, lamp", room, night, probes, 1 << 16, 1.1));
+    scenes.push(scene("white room, lamp", room, night, probes, 1 << 16, 1.35));
     // A cave, a ball in rock the cheese's colour, a lamp by its wall: probed across its floor.
     let ball = |x: i64, y: i64, z: i64| x * x + (y - CAVE.1) * (y - CAVE.1) + z * z < CAVE.0 * CAVE.0;
     let cave = world_of(&["#f3d46c"], &[[0.0, 20.0, 20.0]], move |x, y, z, _| y < 80 && !ball(x, y, z));
     let probes = [0, 12, 24].map(|x| {
         let y = (0..CAVE.1).find(|&y| ball(x, y, 0)).expect("the cave's floor") - 1;
-        [x + (x + y).rem_euclid(2), y, 0]
+        [x, y, 0]
     });
-    scenes.push(scene("yellow cave, lamp", cave, night, probes.to_vec(), 1 << 16, 0.95));
+    scenes.push(scene("yellow cave, lamp", cave, night, probes.to_vec(), 1 << 16, 1.3));
     scenes
 }
 
@@ -236,13 +235,12 @@ const CAVE: (i64, i64) = (32, 40);
 
 /** The ground site nearest (x, z). */
 fn ground_near(x: f64, z: f64) -> [i64; 3] {
-    let (x, z) = (x.round() as i64, z.round() as i64);
-    ground(x + (x + z + 1).rem_euclid(2), z)
+    ground(x.floor() as i64, z.floor() as i64)
 }
 
 /** What the open faces of the voxel at `site` (level 0) send out by Light, on average. */
 fn lit(light: &mut Light, site: [i64; 3]) -> Rgb {
-    let open: Vec<usize> = (0..N).filter(|&f| !light.whole(0, add(site, FACES[f]))).collect();
+    let open: Vec<usize> = (0..F).filter(|&f| !light.whole(0, add(site, FACES[f]))).collect();
     let faces = light.faces(0, site);
     std::array::from_fn(|c| open.iter().map(|&f| faces[f][c]).sum::<f32>() / open.len().max(1) as f32)
 }

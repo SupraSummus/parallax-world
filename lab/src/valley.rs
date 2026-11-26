@@ -24,7 +24,7 @@ use crate::image::Image;
  */
 /**
  * The kind of `generator` one of whose colours is nearest a look's (sRGB,
- * fcc's Look), by index; None for nothing. Grids hold what sites look
+ * lattice's Look), by index; None for nothing. Grids hold what sites look
  * like, not what they are made of: a site of kinds mixed reads as the nearest.
  */
 pub fn kind_near(generator: &Generator) -> impl Fn(u32) -> Option<usize> + '_ {
@@ -166,7 +166,7 @@ pub fn valley(seed: u64, area: Area, cache: &str) -> Image {
             for j in tz..(tz + TILE).min(area.nz) {
                 for i in tx..(tx + TILE).min(area.nx) {
                     let (x, z) = (area.x0 + i as i64, area.z0 + j as i64);
-                    let look = (min_y..max_y).rev().filter(|y| (x + y + z) & 1 == 0).map(|y| grid.get(x, y, z)).find(|l| *l != 0);
+                    let look = (min_y..max_y).rev().map(|y| grid.get(x, y, z)).find(|l| *l != 0);
                     out[j * area.nx + i] = look.and_then(&kind).map_or(0, |k| class[k]);
                 }
             }

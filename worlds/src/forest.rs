@@ -196,11 +196,11 @@ impl Forest {
     }
 }
 
-/** On `path` at z, `above` units over `ground`, on a site: where a camera starts. */
+/** On `path` at z, `above` units over `ground`: where a camera starts. */
 pub fn on_path(ground: &Sloped, path: &Path, z: i64, above: i64) -> [i64; 3] {
     let x = path.x(z).round_units().0;
     let y = ground.at(x, z) + above;
-    [x, y + ((x + y + z) & 1), z]
+    [x, y, z]
 }
 
 /**

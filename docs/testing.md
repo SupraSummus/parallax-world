@@ -12,7 +12,7 @@ cargo test --release -p parallax-native world::   # one crate's, by name
 `pnpm test` leaves out the worlds' checks over seeds
 (`keeps_the_contract::`, `turned::`, `even::` in each crate's `tests/checks.rs`),
 most of the time testing takes;
-only `worldgen/`, `ground/`, `worlds/` and `fcc/` change what they check.
+only `worldgen/`, `ground/`, `worlds/` and `lattice/` change what they check.
 `pnpm test:worlds` runs them, as CI always does;
 one world's: `cargo test --release -p worlds --test checks valley`.
 
@@ -20,19 +20,14 @@ one world's: `cargo test --release -p worlds --test checks valley`.
 
 | File | Covers |
 |------|--------|
-| `bake/src/cells.rs` | Cells of N·FCC and the baker's table of them |
-| `bake/src/lod.rs` | Cells: every site drawn first at the finest level claiming it; no ray meets a finer level after a coarser |
-| `native/src/engine/chunks.rs` | Culling on the GPU leaves the picture unchanged |
-| `native/src/view.rs` | Camera basis, faces, projection, culling |
+| `native/src/view.rs` | Camera basis; a face's tangents cover every ray on screen it draws |
+| `bake/src/face.rs`, `bake/src/lod.rs` | The 18 faces share out the rays, each to the nearest axis; a pick composes from anywhere in its box what one made there would; every site ahead is drawn at the finest level claiming it, and no ray meets a finer level after a coarser |
+| `native/src/engine/chunks/`, `native/src/engine/chunks.rs` | The flat engine: cells said to hold nothing bake empty; the compositor's shader valid (naga); moving keeps most chunks; drawn on the GPU, culling, hiding cells and following changes leave the picture as it was, but for ties |
 | `native/src/tests.rs` | The pointer's ray meets what the picture shows along it: the voxel that stops it, how far, the media before it and what they let through |
-| `native/src/engine/chunks.rs` | Moving keeps most chunks |
-| `native/src/world.rs` | A world on one thread is as one on some; `Level::meets`: every cell holding a voxel, or a see-through one, and of 8·FCC, 32·FCC and smaller no other |
-| `native/src/engine/chunks/renderer.rs` | Cells said to hold nothing that shows, none of their voxels meeting them or all buried, bake empty |
-| `native/src/engine/chunks/occlusion.rs`, `native/src/engine/chunks.rs` | Rays hide what is wholly behind where they stop and nothing else, cast as far as what asks is and on from there, those that wait going on once told to; hiding cells on the CPU draws fewer chunks, and once its probes' cells are in, leaves the picture unchanged |
-| `native/src/engine/chunks.rs` | What the GPU's buffers cannot hold is left out, the farthest first |
-| `native/src/engine/chunks/compositor.rs`, `native/src/engine/voxels.rs` | Their shaders valid as wgpu would find them, without a GPU (naga); the structs they share laid out alike in WGSL and Rust |
-| `fcc/src/lib.rs` | Tiles hold their cubes alike along every axis; a table of tiles in blocks holds what a map would, and a copy changes alone; a part of a grid holds its box's sites as the grid does; each face reads the look through the voxels' faces towards it |
-| `fcc/src/walk.rs`, `worlds/tests/forest.rs`, `worlds/src/valley/moor.rs` | Walking: the ground, steps, walls, jumps; the forest's path through its ferns; into the moor's huts |
+| `native/src/world.rs` | A world on one thread is as one on some; lit anew as one made so; tiles asked for alike whichever way they lie |
+| `native/src/engine/voxels.rs` | Its shader valid as wgpu would find it, without a GPU (naga); the structs it shares laid out alike in WGSL and Rust |
+| `lattice/src/lib.rs` | Tiles hold their cubes alike along every axis; a table of tiles in blocks holds what a map would, and a copy changes alone; a part of a grid holds its box's sites as the grid does; a ray sees a voxel by the faces turned most against it |
+| `lattice/src/walk.rs`, `worlds/tests/forest.rs`, `worlds/src/valley/moor.rs` | Walking: the ground, steps, walls, jumps; the forest's path through its ferns; into the moor's huts |
 | `worlds/tests/checks.rs`, `worlds/cheese/tests/checks.rs`, `worldgen/tests/contract.rs`, `worldgen/tests/shapes.rs` | Each world of a crate's `WORLDS` (`worldgen/src/entry.rs`), the engine's test worlds and each solid keep the contract (`worldgen/src/checks/contract.rs`): generated in pieces equals generated whole; each stratum's cells look on average as what is in them two levels finer, or as their baseline says they don't (`data/contract/` of a world's crate, `worldgen/data/contract/`; `docs/checks.md`); each solid in the worst case |
 | `worlds/tests/checks.rs`, `worlds/cheese/tests/checks.rs` | What generating each world costs, counted, stays within a quarter of its baseline (`data/cost/` of its crate; "Cost" in `docs/checks.md`); its things prefer no places on its grids (`worldgen/src/checks/places.rs`); its directions don't follow the lattice's; each but as its entry knows (`Known`) |
 | `worldgen/src/checks/cells.rs` | A cell's rays are alike along every direction, and weighed they fill it |

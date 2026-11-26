@@ -1,10 +1,11 @@
-//! The face-centred cubic lattice and the voxels on it, as every crate
-//! sees them: the voxel's faces, the view faces' lattices, the levels of
-//! detail a world is held at, the grids of sites generators make and
-//! bakers read, tiles of grids, the light from
-//! voxels' faces (light.rs), rays across them (ray.rs), a body walking on
-//! them (walk.rs); and maps keyed by sites, cells and tiles.
-//! See docs/architecture.md.
+//! The cubic lattice and its voxels, cubes, as every crate sees them:
+//! the voxel's faces, the levels of detail a world is held at, an octree
+//! (a voxel of level ℓ + 1 is eight of level ℓ), the grids of sites
+//! generators make and hosts read, tiles of grids, the light from voxels'
+//! faces (light.rs), rays across them (ray.rs), a body walking on them
+//! (walk.rs); and maps keyed by sites and tiles.
+//! The crate keeps its name from the face-centred cubic lattice the worlds
+//! were on (docs/cubes.md). See docs/architecture.md.
 
 pub mod light;
 pub mod ray;
@@ -56,36 +57,24 @@ pub type FastMap<K, V> = HashMap<K, V, BuildHasherDefault<Fast>>;
 pub type FastSet<K> = HashSet<K, BuildHasherDefault<Fast>>;
 
 /**
- * The voxel's 12 faces' normals in the world, the offsets of the
- * neighbours across them; a face's index is its kind.
+ * The voxel's 6 faces' normals in the world, the offsets of the
+ * neighbours across them; a face's index is its kind: −x, +x, −y, +y, −z,
+ * +z, the axis k / 2.
  */
-pub const VOXEL_FACES: [[i32; 3]; FACE_KINDS] = [
-    [-1, -1, 0],
-    [-1, 1, 0],
-    [1, -1, 0],
-    [1, 1, 0],
-    [0, -1, -1],
-    [0, -1, 1],
-    [0, 1, -1],
-    [0, 1, 1],
-    [-1, 0, -1],
-    [-1, 0, 1],
-    [1, 0, -1],
-    [1, 0, 1],
-];
+pub const VOXEL_FACES: [[i32; 3]; FACE_KINDS] = [[-1, 0, 0], [1, 0, 0], [0, -1, 0], [0, 1, 0], [0, 0, -1], [0, 0, 1]];
 
 /** Kinds of voxel faces. */
-pub const FACE_KINDS: usize = 12;
+pub const FACE_KINDS: usize = 6;
 
 /** The kind of the face opposite face `k`: VOXEL_FACES are so ordered. */
 pub const fn opposite(k: usize) -> usize {
-    k ^ 3
+    k ^ 1
 }
 
 /**
  * The faces (kinds of VOXEL_FACES) a ray along `direction` sees a voxel
  * by: those turned most against it, alike (a ray straight down sees
- * four). What a site looks like along a direction is the mean of how it
+ * three). What a site looks like along a direction is the mean of how it
  * looks through them, wherever the ray enters it: one rule for every
  * host and check (voxels.wgsl's `seen`, worldgen's pictures).
  */
@@ -94,58 +83,14 @@ pub fn facing(direction: [f64; 3]) -> impl Iterator<Item = usize> {
     let least = (0..FACE_KINDS).map(against).fold(f64::INFINITY, f64::min);
     (0..FACE_KINDS).filter(move |&k| against(k) <= least + 1e-9)
 }
-/** Faces of the view. */
-pub const VIEW_FACES: usize = 12;
 
-/** A face's lattice vectors R, U, F (integer, see Face in native's view.rs). */
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Lattice {
-    pub r: [i32; 3],
-    pub u: [i32; 3],
-    pub f: [i32; 3],
-}
-
-impl Lattice {
-    /** The kind (of VOXEL_FACES) of the one face a camera looking along F sees voxels by (`facing`): −F's. */
-    pub fn front(&self) -> usize {
-        facing(self.f.map(f64::from)).next().expect("a face")
-    }
-
-    /** Lattice coordinates (a, b, c) in the world: (a·R + c·F) / 2 + b·U. */
-    pub fn world(&self, [a, b, c]: [i32; 3]) -> [i32; 3] {
-        let Lattice { r, u, f } = self;
-        std::array::from_fn(|d| (a * r[d] + c * f[d]) / 2 + b * u[d])
-    }
-}
-
-/**
- * The view faces' lattices, in the order of native's FACES (view.rs): one per
- * neighbour direction F, U the world axis across it, R = U × F.
- */
-pub fn lattices() -> [Lattice; VIEW_FACES] {
-    std::array::from_fn(|face| {
-        let k = [1, 0, 2][face / 4];
-        let (s, t) = [(1, 1), (-1, 1), (1, -1), (-1, -1)][face % 4];
-        let mut f = [0; 3];
-        f[(k + 1) % 3] = s;
-        f[(k + 2) % 3] = t;
-        let mut u = [0; 3];
-        u[k] = 1;
-        let r = [u[1] * f[2] - u[2] * f[1], u[2] * f[0] - u[0] * f[2], u[0] * f[1] - u[1] * f[0]];
-        Lattice { r, u, f }
-    })
-}
-
-/** Levels of a world's grids. */
+/** Levels of a world's grids: an octree, a site of level ℓ + 1 the cube of eight of level ℓ. */
 pub const GRID_LEVELS: usize = 9;
-
-/** How far around the camera each grid holds the world, in its units. */
-pub const GRID_REACH: f64 = 400.0;
 
 /** Bricks of the sites of a box (see VoxelGrid in worldgen's grid.rs). */
 pub const BRICK: i32 = 8;
-/** Sites a brick holds: every other one of its BRICK³ points. */
-pub const BRICK_SITES: usize = (BRICK * BRICK * BRICK / 2) as usize;
+/** Sites a brick holds: its BRICK³ points. */
+pub const BRICK_SITES: usize = (BRICK * BRICK * BRICK) as usize;
 
 /** A whole voxel's alpha: it stops every ray through its site. */
 pub const ALPHA: u8 = 255;
@@ -232,7 +177,7 @@ pub struct Grid {
     pub n: [i32; 3],
     /** Per brick, z-major, then y, then x: where its sites start in `cells`, in BRICK_SITES; −1 if empty. Bricks may share sites (worldgen's VoxelGrid::bury). */
     pub bricks: Vec<i32>,
-    /** Each brick's sites, z-major, then y, then every other x: each voxel's look, 0 if there is none. */
+    /** Each brick's sites, z-major, then y, then x: each voxel's look, 0 if there is none. */
     pub cells: Vec<Look>,
     /** The sites that do not look alike through every face, by index in `cells`: VIEW_WORDS each. */
     pub views: Vec<u32>,
@@ -245,7 +190,7 @@ pub struct Grid {
      * of the channel it stops least, to what takes one for all.
      */
     pub stops: Vec<u32>,
-    /** Bit i % 32 of word i / 32: whether the voxel at index i of `cells` stops a walking body (fcc's walk.rs). */
+    /** Bit i % 32 of word i / 32: whether the voxel at index i of `cells` stops a walking body (lattice's walk.rs). */
     pub solid: Vec<u32>,
 }
 
@@ -348,7 +293,7 @@ impl Grid {
     fn index(&self, x: i32, y: i32, z: i32) -> Option<usize> {
         let at = self.brick(x, y, z);
         let (x, y, z) = (x - self.min[0], y - self.min[1], z - self.min[2]);
-        (at >= 0).then(|| at as usize * BRICK_SITES + ((((z & 7) * BRICK + (y & 7)) * BRICK + (x & 7)) >> 1) as usize)
+        (at >= 0).then(|| at as usize * BRICK_SITES + (((z & 7) * BRICK + (y & 7)) * BRICK + (x & 7)) as usize)
     }
 
     /** The look of the voxel at site (x, y, z); 0 if empty or outside. */
@@ -548,6 +493,11 @@ impl Tiles {
         Some(self.grid(self.tile(x, y, z))?.get(x, y, z))
     }
 
+    /** The grid of the tile site (x, y, z) is in, if it has one. */
+    pub fn grid_at(&self, x: i32, y: i32, z: i32) -> Option<&Grid> {
+        self.grid(self.tile(x, y, z))
+    }
+
     /** Whether the voxel at site (x, y, z) stops a walking body (Grid::solid); None if no tile has a grid there. */
     pub fn solid(&self, x: i32, y: i32, z: i32) -> Option<bool> {
         Some(self.grid(self.tile(x, y, z))?.solid(x, y, z))
@@ -558,7 +508,7 @@ impl Tiles {
         self.grid(id).is_some()
     }
 
-    /** Whether the tiles from `lo` to `hi`, inclusive, all have grids: those a chunk reads (chunk_reads). */
+    /** Whether the tiles from `lo` to `hi`, inclusive, all have grids. */
     pub fn has_all(&self, [lo, hi]: [TileId; 2]) -> bool {
         (lo[2]..=hi[2]).all(|k| (lo[1]..=hi[1]).all(|j| (lo[0]..=hi[0]).all(|i| self.has([i, j, k]))))
     }
@@ -573,51 +523,6 @@ impl Tiles {
     #[inline]
     fn grid(&self, id: TileId) -> Option<&Grid> {
         self.grids.get(id).map(|grid| &**grid)
-    }
-}
-
-/**
- * The sites read in a face's lattice coordinates (a, b, c) (see Face in
- * native's view.rs), each voxel's look the one through its face towards
- * the camera, −F: a chunk is drawn as seen along F, so that is the face
- * its voxels show (docs/architecture.md, section 3).
- */
-pub struct Reader<'a> {
-    tiles: &'a Tiles,
-    lattice: Lattice,
-    /** The kind of the faces towards the camera. */
-    front: usize,
-}
-
-impl<'a> Reader<'a> {
-    pub fn new(tiles: &'a Tiles, lattice: Lattice) -> Reader<'a> {
-        Reader { tiles, lattice, front: lattice.front() }
-    }
-
-    /**
-     * The looks at (a + 2i, b, c) for i in [0, count), through the faces
-     * towards the camera, 0 where empty or outside, to `visit` with each i, for a site (a, b, c): stepping a by
-     * 2 steps (x, y, z) by R, and the grid only changes at a tile's edge.
-     * Pieces held in part are whole or none (`whole_or_none`).
-     */
-    #[inline]
-    pub fn row(&self, a: i32, b: i32, c: i32, count: i32, mut visit: impl FnMut(i32, Look)) {
-        debug_assert!(((a ^ c) | (b ^ c)) & 1 == 0, "not a site");
-        let r = self.lattice.r;
-        let [mut x, mut y, mut z] = self.lattice.world([a, b, c]);
-        let mut tile = self.tiles.tile(x, y, z);
-        let mut grid = self.tiles.grid(tile);
-        for i in 0..count {
-            let here = self.tiles.tile(x, y, z);
-            if here != tile {
-                tile = here;
-                grid = self.tiles.grid(tile);
-            }
-            visit(i, whole_or_none(grid.map_or(0, |grid| grid.face(x, y, z, self.front)), x, y, z));
-            x += r[0];
-            y += r[1];
-            z += r[2];
-        }
     }
 }
 
@@ -704,7 +609,7 @@ mod tests {
         // Two bricks along y sharing sites, a third above with a site that glows and one unlike through its faces.
         let mut grid = Grid::new([0, 0, 0], [8, 24, 8], 2);
         grid.bricks = vec![0, 0, 1];
-        let index = |[x, y, z]: [i32; 3]| (((z * BRICK + y % BRICK) * BRICK + x) >> 1) as usize;
+        let index = |[x, y, z]: [i32; 3]| ((z * BRICK + y % BRICK) * BRICK + x) as usize;
         let (rock, lamp, painted) = ([2, 2, 2], [2, 18, 2], [4, 20, 2]);
         grid.cells[index(rock)] = 7;
         grid.solid[index(rock) / 32] = 1 << (index(rock) % 32);
@@ -727,35 +632,8 @@ mod tests {
     #[test]
     fn a_ray_sees_a_voxel_by_the_faces_turned_most_against_it() {
         let seen = |d: [f64; 3]| facing(d).map(|k| VOXEL_FACES[k]).collect::<Vec<_>>();
-        assert_eq!(seen([0.0, -1.0, 0.0]), [[-1, 1, 0], [1, 1, 0], [0, 1, -1], [0, 1, 1]]);
-        assert_eq!(seen([0.3, -1.0, 0.1]), [[-1, 1, 0]]);
-        for lattice in lattices() {
-            assert_eq!(seen(lattice.f.map(f64::from)), [lattice.f.map(|v| -v)]);
-        }
-    }
-
-    #[test]
-    fn each_face_reads_the_look_through_the_voxels_faces_towards_it() {
-        // Two voxels, one of look 1 through every face, one with a look of its own through each.
-        let mut grid = Grid::new([0, 0, 0], [8, 8, 8], 1);
-        grid.bricks[0] = 0;
-        let index = |[x, y, z]: [i32; 3]| (((z * BRICK + y) * BRICK + x) >> 1) as usize;
-        let (plain, painted) = ([2, 2, 2], [4, 4, 2]);
-        grid.cells[index(plain)] = 1;
-        grid.cells[index(painted)] = 1;
-        grid.views = [index(painted) as u32].into_iter().chain((0..FACE_KINDS as u32).map(|k| 10 + k)).collect();
-        let tiles = Tiles::one(grid);
-        for lattice in lattices() {
-            let reader = Reader::new(&tiles, lattice);
-            let read = |[x, y, z]: [i32; 3]| {
-                let [a, b, c] = [lattice.r, lattice.u, lattice.f].map(|v| v[0] * x + v[1] * y + v[2] * z);
-                let mut look = None;
-                reader.row(a, b, c, 1, |_, l| look = Some(l));
-                look.expect("read")
-            };
-            assert_eq!(read(plain), 1);
-            assert_eq!(read(painted), 10 + lattice.front() as u32, "seen along {:?}", lattice.f);
-            assert_eq!(read([6, 6, 2]), 0);
-        }
+        assert_eq!(seen([0.0, -1.0, 0.0]), [[0, 1, 0]]);
+        assert_eq!(seen([0.3, -1.0, 0.1]), [[0, 1, 0]]);
+        assert_eq!(seen([1.0, 1.0, 0.0]), [[-1, 0, 0], [0, -1, 0]]);
     }
 }

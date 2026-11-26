@@ -8,4 +8,4 @@ publish = false
 worldgen = { path = "../worldgen" }
 
 [dev-dependencies]
-fcc = { path = "../fcc" }
+lattice = { path = "../lattice" }

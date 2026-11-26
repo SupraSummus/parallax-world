@@ -1,13 +1,12 @@
-//! Scenes made elsewhere, as worlds: voxels on the FCC lattice read
-//! from a file (scripts/voxelize.py makes one from a glTF scene), each
-//! coarser level made from the one below. Nothing is outside the scene.
+//! Scenes made elsewhere, as worlds: cubes of level 0 read from a file
+//! (scripts/voxelize.py makes one from a glTF scene), each coarser level
+//! made from the one below. Nothing is outside the scene.
 //!
-//! The file, little-endian: b"FCC0"; the palette's size (u32, at most
+//! The file, little-endian: b"CUB0"; the palette's size (u32, at most
 //! 255) and its colours (r, g, b); the box's min and size (i32 × 3 each,
-//! lattice units, min and width even); then its sites (x + y + z even)
-//! in order z, y, x, as runs: the number of empty sites, of full ones
-//! (varints), and the full ones' ids (bytes, 1 the first colour); a run
-//! with no full ones ends it.
+//! lattice units); then its sites in order z, y, x, as runs: the number
+//! of empty sites, of full ones (varints), and the full ones' ids (bytes,
+//! 1 the first colour); a run with no full ones ends it.
 
 use std::sync::Arc;
 
@@ -39,38 +38,29 @@ impl Level {
         self.index(p).map_or(0, |i| self.ids[i])
     }
 
-    /**
-     * The level above: a site is full where FULL of its voxel is, and
-     * holds what most of that does. Its voxel holds the site under it
-     * whole, half of each of the 12 nearest, and a sixth of each of the 6
-     * next (on its 4-fold corners).
-     */
+    /** The level above: a site is full where FULL of the eight in its cube are, and holds what most of them do. */
     fn coarser(&self) -> Level {
-        // A site of margin: a finer site's voxel reaches into the coarser ones beside its own.
-        let min = self.min.map(|v| v.div_euclid(2) - 1);
-        let max = [0, 1, 2].map(|i| (self.min[i] + self.n[i]).div_euclid(2) + 2);
+        let min = self.min.map(|v| v.div_euclid(2));
+        let max = [0, 1, 2].map(|i| (self.min[i] + self.n[i] + 1).div_euclid(2));
         let mut level = Level::new(min, max);
         let mut weights = [0u32; 256];
         for z in min[2]..max[2] {
             for y in min[1]..max[1] {
-                let mut x = min[0] + (min[0] + y + z).rem_euclid(2);
-                while x < max[0] {
-                    let c = [2 * x, 2 * y, 2 * z];
-                    let near = NEAR.map(|(d, w)| (self.get([c[0] + d[0], c[1] + d[1], c[2] + d[2]]), w));
+                for x in min[0]..max[0] {
+                    let ids = (0..8).map(|k| self.get([2 * x + (k & 1), 2 * y + (k >> 1 & 1), 2 * z + (k >> 2)]));
                     let (mut total, mut best) = (0, (0, 0u8));
-                    for (id, w) in near.into_iter().filter(|(id, _)| *id != 0) {
-                        total += w;
-                        weights[id as usize] += w;
+                    for id in ids.clone().filter(|&id| id != 0) {
+                        total += 1;
+                        weights[id as usize] += 1;
                         best = best.max((weights[id as usize], id));
                     }
                     if total >= FULL {
                         let i = level.index([x, y, z]).expect("in its box");
                         level.ids[i] = best.1;
                     }
-                    for (id, _) in near {
+                    for id in ids {
                         weights[id as usize] = 0;
                     }
-                    x += 2;
                 }
             }
         }
@@ -86,35 +76,8 @@ impl Level {
     }
 }
 
-/**
- * How much of a coarser site's voxel the finer sites in it must fill
- * (of 48, NEAR's shares) for it to be full: a sheet a site thick through
- * its middle fills 22, one between two coarser sites 12 of each.
- */
-const FULL: u32 = 12;
-
-/** The finer sites in a coarser one's voxel, and their shares of it, in sixths. */
-const NEAR: [([i64; 3], u32); 19] = [
-    ([0, 0, 0], 6),
-    ([1, 1, 0], 3),
-    ([1, -1, 0], 3),
-    ([-1, 1, 0], 3),
-    ([-1, -1, 0], 3),
-    ([1, 0, 1], 3),
-    ([1, 0, -1], 3),
-    ([-1, 0, 1], 3),
-    ([-1, 0, -1], 3),
-    ([0, 1, 1], 3),
-    ([0, 1, -1], 3),
-    ([0, -1, 1], 3),
-    ([0, -1, -1], 3),
-    ([2, 0, 0], 1),
-    ([-2, 0, 0], 1),
-    ([0, 2, 0], 1),
-    ([0, -2, 0], 1),
-    ([0, 0, 2], 1),
-    ([0, 0, -2], 1),
-];
+/** Of the eight sites in a coarser one's cube, how many must be full for it to be: half, so a sheet a site thick stays one. */
+const FULL: u32 = 4;
 
 /** A file's bytes, read in order. */
 struct Reader<'a>(std::slice::Iter<'a, u8>);
@@ -152,15 +115,14 @@ impl Scene {
     /** Reads a file (see the module's comment); panics on a malformed one. */
     pub fn read(bytes: &[u8]) -> Scene {
         let mut r = Reader(bytes.iter());
-        assert_eq!([r.byte(), r.byte(), r.byte(), r.byte()], *b"FCC0", "not a scene");
+        assert_eq!([r.byte(), r.byte(), r.byte(), r.byte()], *b"CUB0", "not a scene");
         let count = r.i32();
         assert!((0..=255).contains(&count), "{count} colours: ids are bytes");
         let colours = (0..count).map(|_| u32::from_be_bytes([0, r.byte(), r.byte(), r.byte()])).collect();
         let min: [i64; 3] = std::array::from_fn(|_| r.i32().into());
         let n: [i64; 3] = std::array::from_fn(|_| r.i32().into());
-        assert!(min.iter().all(|v| v % 2 == 0) && n[0] % 2 == 0, "min and width even");
         let mut level = Level::new(min, [0, 1, 2].map(|i| min[i] + n[i]));
-        // A site's rank in the file's order: each row along x has n[0] / 2.
+        // A site's rank in the file's order is its index.
         let mut rank = 0;
         loop {
             rank += r.varint();
@@ -169,11 +131,9 @@ impl Scene {
                 break;
             }
             for _ in 0..full {
-                let (row, x) = (rank / (n[0] / 2), rank % (n[0] / 2));
-                let (y, z) = (row % n[1], row / n[1]);
                 let id = r.byte();
                 assert!(id != 0 && i32::from(id) <= count, "id {id} of {count} colours");
-                level.ids[((z * n[1] + y) * n[0] + 2 * x + (y + z) % 2) as usize] = id;
+                level.ids[rank as usize] = id;
                 rank += 1;
             }
         }
@@ -242,11 +202,11 @@ mod tests {
 
     /** A scene of two colours, its box at `min` of size `n`, the sites `full` (in the box's coordinates) with their ids. */
     fn scene(min: [i32; 3], n: [i32; 3], full: &[([i32; 3], u8)]) -> Scene {
-        let mut file = b"FCC0".to_vec();
+        let mut file = b"CUB0".to_vec();
         file.extend(2i32.to_le_bytes());
         file.extend([0; 6]);
         file.extend(min.iter().chain(&n).flat_map(|v| v.to_le_bytes()));
-        let mut ranked: Vec<_> = full.iter().map(|&([x, y, z], id)| (((z * n[1] + y) * n[0] + x) / 2, id)).collect();
+        let mut ranked: Vec<_> = full.iter().map(|&([x, y, z], id)| ((z * n[1] + y) * n[0] + x, id)).collect();
         ranked.sort();
         let mut at = 0;
         // A run of one site each; small boxes' gaps fit a byte.
@@ -260,23 +220,26 @@ mod tests {
 
     /** The sites of a floor at y of the box's coordinates, across a box 8 wide. */
     fn floor(y: i32) -> Vec<([i32; 3], u8)> {
-        (0..8).flat_map(|z| (0..8).map(move |x| [x, y, z])).filter(|p| (p[0] + p[1] + p[2]) % 2 == 0).map(|p| (p, 1)).collect()
+        (0..8).flat_map(|z| (0..8).map(move |x| ([x, y, z], 1))).collect()
     }
 
     #[test]
-    fn a_coarser_site_holds_what_most_of_its_voxel_does() {
-        // The site at the middle of 1, three of its nearest of 2: 2 fills more of the coarse voxel.
-        let scene = scene([-2, -2, -2], [6, 5, 5], &[([2, 2, 2], 1), ([3, 3, 2], 2), ([1, 3, 2], 2), ([2, 3, 3], 2)]);
-        assert_eq!(scene.at(0, 0, 0, 2), 2);
+    fn a_coarser_site_holds_what_most_of_its_cube_does() {
+        // Of the eight in the cube of coarse site 0, one of 1 and three of 2.
+        let most = scene([0; 3], [4; 3], &[([0, 0, 0], 1), ([1, 0, 0], 2), ([0, 1, 0], 2), ([1, 1, 1], 2)]);
+        assert_eq!(most.at(0, 0, 0, 2), 2);
+        // Three are not enough.
+        let sparse = scene([0; 3], [4; 3], &[([0, 0, 0], 1), ([1, 0, 0], 2), ([0, 1, 0], 2)]);
+        assert_eq!(sparse.at(0, 0, 0, 2), 0);
     }
 
     #[test]
-    fn coarser_levels_keep_a_floor_a_site_thick_and_opaque() {
-        // Through the coarse sites at y = 0: they hold it, those over and under it don't.
-        let through = scene([0, -4, 0], [8, 8, 8], &floor(4));
-        assert_eq!([through.at(2, -2, 0, 2), through.at(2, 0, 2, 2), through.at(2, 2, 0, 2)], [0, 1, 0]);
-        // Between them: both hold it, so no ray goes through.
-        let between = scene([0, -4, 0], [8, 8, 8], &floor(5));
-        assert_eq!([between.at(2, 0, 2, 2), between.at(4, 2, 2, 2), between.at(2, 4, 2, 2)], [1, 1, 0]);
+    fn coarser_levels_keep_a_floor_a_site_thick() {
+        // In the coarse sites it is in, at every level, whichever half of them it fills.
+        for y in [4, 5] {
+            let floor = scene([0, 0, 0], [8, 8, 8], &floor(y));
+            assert_eq!([floor.at(2, 2, 2, 2), floor.at(2, 4, 2, 2), floor.at(2, 6, 2, 2)], [0, 1, 0], "at {y}");
+            assert_eq!([floor.at(0, 0, 0, 4), floor.at(0, 4, 0, 4)], [0, 1], "at {y}");
+        }
     }
 }

@@ -3,15 +3,20 @@
 Light on the lattices (the crate `light/`) is a prototype,
 in `look`'s pictures and native's computed lighting.
 The model is in its header (`light/src/lib.rs`),
-and how native's engines use it in section 4 of [architecture.md](architecture.md)
-("The engines, and rays through the voxels").
+and how native uses it in section 2 of [architecture.md](architecture.md).
 Here: what it gets wrong, what was tried, and what it costs.
 What is left to do is in [todo.md](todo.md).
 
 ## What it gets wrong, and why
 
-Light comes along the 12 neighbours' directions only,
-and each level takes one step (`STEPS`; native's panel sets up to three)
+Light comes along 18 directions only,
+the 6 across a cube's faces and the 12 across its edges,
+and only ever across faces: a step across an edge goes half through each
+of the two sites beside it, then the one past it.
+Off a whole voxel, where a site beside the edge is whole too and touches it,
+all of it goes through the other: so open ground under the sky is lit
+as it should be, not two thirds as bright.
+Each level takes one step (`STEPS`; native's panel sets up to three)
 before the coarser one takes over,
 or more where the coarser fills what it leaves empty.
 So light from D away comes from a level whose sites are about D across,
@@ -29,17 +34,19 @@ Columns put a whole site where its middle was in a span,
 so the coarse levels lost a roof thinner than their spacing
 along some directions
 (their solid spans cover their sites in part now; the tunnel was not lit anew);
-and taking over, a coarser level's light comes to the middle of its site,
-what lies between there and where it took over unread.
+and taking over, a coarser level's light comes from the face of its cube
+the line leaves by, between it and the 3 beside it in its plane
+(bilinear, weighed by how much each site lets through),
+what lies between there and where it took over unread:
+the same hand-off at every level of the octree.
 
 Three steps a level leave the tunnel ten times too bright, not hundreds,
 but the lamp several times further off.
 
-The sun is one of the 12 directions.
-Light reads a coarser level at the nearest site and its 12 neighbours (`reads`),
-so near a corner where six voxels meet it misses one within its reach,
-and light jumps a little there;
-every site within reach would leak light through walls one site thick.
+The sun is one of the 18 directions.
+Light taken over from a coarser level's single site was blocky,
+a step at each coarse cube's face;
+read between the four faces, it is smooth.
 
 ## Where it is to go, and what was tried
 
@@ -54,7 +61,7 @@ only the share of the light its sites around have room for,
 or after two steps.
 Each lit the closed room better,
 and left the roof's middle and the room past the yard's door dark, or lit it many times too much:
-there no direction of the 12 meets what is lit,
+there no direction of the 18 meets what is lit,
 and the coarser levels' blur is all that carries light.
 So what is left in rooms, under roofs and in the tunnel
 is how few the directions are and how coarse a level takes over,
@@ -95,20 +102,19 @@ Not kept.
 ## Against the reference
 
 Against the reference (`light/src/reference.rs`, test `against_the_reference`;
-the ignored test `maps` draws the scenes from above):
-a lamp lights the ground in four lobes, along the upward directions,
-and three times too little right under it;
-under a roof turned off the lattice, light is off by up to 1.7 times;
-along the lattice, its middle gets a third of what it should:
-from there no direction meets the lit ground past its edge;
-a wall's shadow in the sun is short and blotchy,
+the ignored test `maps` draws the scenes from above), on cubes:
+open ground under the sky, and under blocks strewn over it, as it should be;
+a lamp's light within a sixth; under a roof, turned or not, within a third;
+a wall's shadow in the sun too long, past where the sun is back,
 as the levels that carry it get coarser;
 past a door from a yard, where only bounced light comes,
-a room is about as bright as it should be, and the yard a third as bright.
+a room four to six times too dark, and the yard a fifth too dark.
+On the FCC lattice, the roof along it and the lamp were off by twice as much,
+the rooms bounced light about as now.
 
-In a closed white room, where light bounces many times,
-the light on the floor is a few times too little,
-as little as reaches it from the lamp.
+In a closed white room or a cave, where light bounces many times,
+the light on the floor is three to six times too little,
+little more than reaches it from the lamp.
 
 A lamp lights only as far as the coarser levels hold it:
 the cheese's crystals stopped at level 3, and its caverns were black
@@ -142,9 +148,8 @@ A window smaller than the coarser levels' sites lets no sky in at all
 
 ## In native, and what it costs
 
-Native's bakers each light what they show with a `Light` of their own:
+The world's threads each light what rays ask for with a `Light` of their own:
 they share the world, its tiles, and the light found at their sites (`Shared`),
-with each other and the world's threads,
 so a tile is made once, for what draws it and what lights it
 (`Shared::make_tiles`),
 and a site's light is found once, whichever of them asks.
@@ -263,12 +268,10 @@ but lighting and keeping that light would cost three times as much.
 How a site shows to hosts and to light, and what glows, is a prototype too:
 
 - a site's pieces show hosts a voxel where a hash is under the site's alpha
-  (`fcc::shows_whole`), as leaves should,
+  (`lattice::shows_whole`), as leaves should,
   but measured houses' walls come out ragged;
   light reads their share, of the rays through the voxel
-  (`VoxelGrid::light`; a line through sites' middles meets it
-  3/2 as often, `CROSSING` in `fcc/src/ray.rs`),
-  so it goes on through sites filled in part
+  (`VoxelGrid::light`), so it goes on through sites filled in part
   where it stopped at the first voxel shown:
   a forest or a city at night takes half as long again to light, or more;
   a crown's voxels at the coarse levels come out darker,

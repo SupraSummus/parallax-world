@@ -51,14 +51,14 @@ impl Palette {
  * as where kinds mix. For messages, tests and stats: grids hold what
  * sites look like, not what they are made of.
  */
-pub fn kind_of<'a>(generator: &'a Generator) -> impl Fn(fcc::Look) -> Option<&'a KindDef> + 'a {
+pub fn kind_of<'a>(generator: &'a Generator) -> impl Fn(lattice::Look) -> Option<&'a KindDef> + 'a {
     let palette = Palette::new(&generator.kinds, generator.seed);
     let rgb = |colour: &[u32; 3]| colour.map(|c| srgb(c as u16));
     let colours: Vec<(usize, [u8; 3])> = (0..generator.kinds.len())
         .flat_map(|k| palette.shades[k].iter().chain([&palette.means[k]]).map(move |c| (k, c)).collect::<Vec<_>>())
         .map(|(k, c)| (k, rgb(c)))
         .collect();
-    let of = move |look: fcc::Look| {
+    let of = move |look: lattice::Look| {
         let at = look.to_le_bytes();
         let far = |c: &[u8; 3]| (0..3).map(|i| c[i].abs_diff(at[i])).max().expect("channels");
         let (k, c) = colours.iter().min_by_key(|(_, c)| far(c))?;

@@ -79,12 +79,12 @@ fn ground(_: u64) -> worldgen::World {
 #[ignore = "draws on the GPU: needs Vulkan, as Mesa's software one"]
 fn ground_along_a_face_shows_no_gaps() {
     const PIXELS: [u32; 2] = [320, 200];
-    for kind in [Kind::Reliefs, Kind::Flat] {
+    for kind in [Kind::Flat, Kind::Voxels] {
         let mut world = World::new(ground(1), None, 4);
         let look = Look { fog: f64::INFINITY, ..Look::new([0.0, 16.0, 0.0], [45.0, -10.0], FOV, 1000.0, PIXELS.map(f64::from)) };
         let (width, pixels) = (PIXELS[0], drawn(&mut *kind.make(&world), &mut world, &look));
         let [right, up, forward] = view::view_basis(look.yaw, look.pitch);
-        let focal = look.view().focal;
+        let focal = view::focal_length(look.fov, f64::from(PIXELS[0]), f64::from(PIXELS[1]));
         let (mut ground, mut gaps) = (0, 0);
         for j in 0..PIXELS[1] {
             for i in 0..PIXELS[0] {
@@ -121,16 +121,15 @@ fn flooded(seed: u64) -> worldgen::World {
 }
 
 /**
- * A medium thin along a face's axis, on the ground, hides it from above,
- * though rays cross it between the planes its slabs' pictures are on,
- * many times its depth apart (veil_fragment), and meet the ground within
- * a slab (veil_vertex).
+ * A medium thin along an axis, on the ground, hides it from above;
+ * drawn flat too, though rays cross it between the planes its slabs'
+ * pictures are on, many times its depth apart (veil_fragment).
  */
 #[test]
 #[ignore = "draws on the GPU: needs Vulkan, as Mesa's software one"]
 fn a_thin_medium_on_the_ground_hides_it_from_above() {
     const PIXELS: [u32; 2] = [320, 200];
-    for kind in [Kind::Reliefs, Kind::Flat] {
+    for kind in [Kind::Flat, Kind::Voxels] {
         let mut world = World::new(flooded(1), None, 4);
         let look = Look { fog: f64::INFINITY, ..Look::new([0.0, 32.0, 0.0], [45.0, -25.0], FOV, 300.0, PIXELS.map(f64::from)) };
         let pixels = drawn(&mut *kind.make(&world), &mut world, &look);
@@ -143,8 +142,8 @@ fn a_thin_medium_on_the_ground_hides_it_from_above() {
 
 #[test]
 #[ignore = "draws on the GPU: needs Vulkan, as Mesa's software one"]
-fn a_medium_of_reliefs_lets_through_as_much_as_its_extinction_says() {
-    medium_lets_through_as_much_as_its_extinction_says(Kind::Reliefs);
+fn a_flat_medium_lets_through_as_much_as_its_extinction_says() {
+    medium_lets_through_as_much_as_its_extinction_says(Kind::Flat);
 }
 
 #[test]
@@ -225,7 +224,7 @@ fn a_medium_of_voxels_stops_more_of_the_channels_its_colour_is_darker_in() {
     let [red, green] = [0, 1].map(|c| (white[c] - black[c]) / bare[c]);
     let expected = (-0.015 * (FAR - NEAR) as f64 / std::f64::consts::SQRT_2).exp();
     assert!((red - expected).abs() < 0.01, "red: {red:.3} let through, {expected:.3} expected");
-    let [most, less] = [0xbc, 0x89].map(|c| f64::from(fcc::light::srgb_to_linear(f32::from(c as u8) / 255.0)));
+    let [most, less] = [0xbc, 0x89].map(|c| f64::from(lattice::light::srgb_to_linear(f32::from(c as u8) / 255.0)));
     let expected = expected.powf(most / less);
     assert!((green - expected).abs() < 0.01, "green: {green:.3} let through, {expected:.3} expected");
 }
@@ -254,7 +253,7 @@ fn red_and_green<const RED_NEAR: bool>(_: u64) -> worldgen::World {
 #[test]
 #[ignore = "draws on the GPU: needs Vulkan, as Mesa's software one"]
 fn a_nearer_medium_shows_over_one_behind() {
-    for kind in [Kind::Reliefs, Kind::Voxels] {
+    for kind in [Kind::Flat, Kind::Voxels] {
         // Red less green in the middle of the picture, with red nearer and with green nearer.
         let [red_near, green_near] = [red_and_green::<true> as Make, red_and_green::<false>].map(|make| {
             let (width, pixels) = along_a_face(kind, make);

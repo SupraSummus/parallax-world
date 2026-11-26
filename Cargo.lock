@@ -184,7 +184,7 @@ checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
 name = "bake"
 version = "0.0.0"
 dependencies = [
- "fcc",
+ "lattice",
 ]
 
 [[package]]
@@ -726,10 +726,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "caf1079563223d5d59d83c85886a56e586cfd5c1a26292e971a0fa266531ac5a"
 
 [[package]]
-name = "fcc"
-version = "0.0.0"
-
-[[package]]
 name = "fdeflate"
 version = "0.3.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -949,7 +945,7 @@ dependencies = [
 name = "ground"
 version = "0.0.0"
 dependencies = [
- "fcc",
+ "lattice",
  "worldgen",
 ]
 
@@ -1203,6 +1199,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "lattice"
+version = "0.0.0"
+
+[[package]]
 name = "leb128"
 version = "0.2.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1252,7 +1252,7 @@ dependencies = [
 name = "light"
 version = "0.0.0"
 dependencies = [
- "fcc",
+ "lattice",
  "worldgen",
 ]
 
@@ -1815,7 +1815,7 @@ dependencies = [
  "egui",
  "egui-wgpu",
  "egui-winit",
- "fcc",
+ "lattice",
  "libc",
  "light",
  "naga",
@@ -3388,7 +3388,7 @@ dependencies = [
 name = "worldgen"
 version = "0.0.0"
 dependencies = [
- "fcc",
+ "lattice",
  "libm",
 ]
 
@@ -3397,8 +3397,8 @@ name = "worlds"
 version = "0.0.0"
 dependencies = [
  "cheese",
- "fcc",
  "ground",
+ "lattice",
  "light",
  "worldgen",
 ]
