@@ -1,6 +1,6 @@
 use super::*;
 use lattice::light::colour;
-use worldgen::generator::{Field, Generator, KindDef, Layer, Node, Op, Population, SOLID, cuboid};
+use worldgen::generator::{Field, Generator, KindDef, Layer, Node, Op, Population, SOLID, Shape, cuboid};
 
 const STONE: u8 = 0;
 const LAMP_KIND: u8 = 1;
@@ -22,26 +22,30 @@ fn world_of(
     lamps: &[[f64; 3]],
     stone: impl Fn(i64, i64, i64, i64) -> bool + Send + Sync + 'static,
 ) -> World {
-    world_with(colour, lamps, &[], stone)
+    world_with(colour, lamps, Vec::new(), stone)
 }
 
-/** As `world_of`, with blocks of stone the lamps' size at `blocks`. */
+/** As `world_of`, with `shapes` of stone. */
 fn world_with(
     colour: &'static [&'static str],
     lamps: &[[f64; 3]],
-    blocks: &[[f64; 3]],
+    shapes: Vec<Shape>,
     stone: impl Fn(i64, i64, i64, i64) -> bool + Send + Sync + 'static,
 ) -> World {
     let kinds = vec![
         KindDef { name: "stone", kind_type: 1, colors: colour, walk_through: false, glows: false, medium: false },
         KindDef { name: "lamp", kind_type: 6, colors: &["#ffffff"], walk_through: false, glows: true, medium: false },
     ];
-    let cube = |p: &[f64; 3], kind| cuboid(p.map(|c| c - LAMP / 2.0), p.map(|c| c + LAMP / 2.0), kind, SOLID, Op::Fill);
-    let shapes: Vec<_> = lamps.iter().map(|p| cube(p, LAMP_KIND)).chain(blocks.iter().map(|p| cube(p, STONE))).collect();
+    let shapes: Vec<_> = lamps.iter().map(|&p| cube(p, LAMP_KIND)).chain(shapes).collect();
     let lamps = Population::new("lamps", 1.0, 1024).reach(2048).at(|_| vec![([0.0; 3], ())], move |_, _| Some(Node::of(shapes.clone())));
     let ground = Field::at("stone", 0.0, Op::Fill, move |x, y, z| stone(x, y, z, worldgen::sites::spacing()).then_some((STONE, None)));
     let layers = vec![Layer::Field(ground), Layer::Population(lamps)];
     World { generator: Generator { kinds, seed: 1, layers }, spawn: [0; 3], heights: Some((-64, 1024)), points: Vec::new() }
+}
+
+/** A cube the lamps' size about `p`. */
+fn cube(p: [f64; 3], kind: u8) -> Shape {
+    cuboid(p.map(|c| c - LAMP / 2.0), p.map(|c| c + LAMP / 2.0), kind, SOLID, Op::Fill)
 }
 
 /** A site on top of ground below y = 0: at y = −1. */
@@ -209,7 +213,7 @@ fn scenes() -> Vec<Scene> {
             ]
         })
         .collect();
-    let canopy = world_with(&["#808080"], &[], &blocks, |_, y, _, _| y < 0);
+    let canopy = world_with(&["#808080"], &[], blocks.into_iter().map(|p| cube(p, STONE)).collect(), |_, y, _, _| y < 0);
     scenes.push(scene("blocks over the ground", canopy, sky, [0.0, 24.0, 48.0].map(|x| ground_near(x, 0.0)).to_vec(), 4096, 0.1));
     // A closed room, white, a lamp in it: most of the light on its floor has bounced, many times.
     let room = world_of(&["#f0f0f0"], &[[0.0, 24.0, 0.0]], |x, y, z, s| {
@@ -377,5 +381,32 @@ fn maps() {
             .collect();
         let picture = Picture { width: width * scale, height: w * scale, rgb, ..Picture::default() };
         std::fs::write(format!("{file}.png"), picture.png()).expect("written");
+    }
+}
+
+#[test]
+fn thin_walls_keep_the_sky_out() {
+    // Sheds of cuboids `t` thick, thinner than the coarse levels' sites, as worlds draw walls, `h` from their middle to
+    // their walls inside, some moved off the lattice by `o`: the reference lights none inside (docs/light.md, "Thin
+    // walls").
+    let sky = Brightness { sky: 1.0, sun: 1.0, glow: 0.0 };
+    let open = Light::new(world(&[], |_, y, _, _| y < 0), Shared::new(sky)).on_voxel(0, ground(1, 0))[1];
+    for (t, h, o) in [(1.0, 40.0, 0.0), (1.0, 40.0, 0.5), (4.0, 40.0, 3.0), (1.0, 100.0, 0.0)] {
+        let c = |min: [f64; 3], max: [f64; 3]| cuboid(min.map(|v| v + o), max.map(|v| v + o), STONE, SOLID, Op::Fill);
+        let a = h + t;
+        let walls_and_roof = vec![
+            c([-a, 0.0, -a], [-h, a, a]),
+            c([h, 0.0, -a], [a, a, a]),
+            c([-a, 0.0, -a], [a, a, -h]),
+            c([-a, 0.0, h], [a, a, a]),
+            c([-a, h, -a], [a, a, a]),
+        ];
+        let mut light = Light::new(world_with(&["#808080"], &[], walls_and_roof, |_, y, _, _| y < 0), Shared::new(sky));
+        let h = h as i64;
+        // Its floor's middle, by a wall, in a corner, and the air above.
+        for p in [[0, -1, 0], [h - 2, -1, 0], [h - 2, -1, h - 2], [0, h / 2, 0]] {
+            let inside = light.on_voxel(0, p)[1] / open;
+            assert!(inside < 0.02, "a shed {t} thick, {h} across, off by {o}: at {p:?}, {inside} of the open's");
+        }
     }
 }
