@@ -23,7 +23,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use bake::face::{FACES, Face, faces};
 use bake::lod::{CellChunk, Lod, spread};
-use bake::{Medium, half_layer, plane};
+use bake::{Half, Medium, half_layer, plane};
 use egui_wgpu::wgpu;
 use lattice::light::{linear_to_srgb, srgb_to_linear};
 use lattice::{FastMap, FastSet};
@@ -300,8 +300,8 @@ fn place([a, b]: [i32; 2]) -> [i32; 2] {
  * `start` items into the chunk's: a picture of it per slab, of its
  * columns' bricks as flatten lays them out: [how many columns its rows are, how many rows],
  * then its columns, all in their box from its first place, row by row,
- * each an item: [colour, its optical depths in its slab's nearer half and
- * its farther, as f16s], 0 where none. A cluster each, holding its box,
+ * each two items, its slab's nearer half and its farther:
+ * [colour, optical depths (depth_bits)], 0 where none. A cluster each, holding its box,
  * from its slab's front to its middle plane, its slab's first layer and
  * its halves' depth.
  * As a picture of whole voxels is enlarged by how far its pillars reach (Flat),
@@ -326,11 +326,11 @@ pub fn veils(face: &Face, medium: &[Medium], unit: f64, half_layer: f64, slab: i
         let [rows, width] = [high[0] - least[0] + 1, high[1] - least[1] + 1];
         let first = items.len();
         items.push([width as u32, rows as u32]);
-        items.resize(first + 1 + (rows * width) as usize, [0; 2]);
+        items.resize(first + 1 + 2 * (rows * width) as usize, [0; 2]);
         for p in picture {
             let [r, s] = place(p.column);
-            let [near, far] = p.depth.map(f16_bits);
-            items[first + 1 + ((r - least[0]) * width + s - least[1]) as usize] = [p.colour, near | far << 16];
+            let at = first + 1 + 2 * ((r - least[0]) * width + s - least[1]) as usize;
+            items[at..at + 2].copy_from_slice(&p.halves.map(|Half { colour, depth }| [colour, depth_bits(depth)]));
         }
         let centre = |[r, s]: [i32; 2]| column_centre(brick, least, (r - least[0]) as u32, (s - least[1]) as u32);
         let (lo, hi) = bricks_box(brick, places().map(centre));
@@ -348,21 +348,17 @@ pub fn veils(face: &Face, medium: &[Medium], unit: f64, half_layer: f64, slab: i
 }
 
 /**
- * The bits of the f16 nearest `v`, as WGSL's unpack2x16float takes them:
- * of an optical depth, at least a voxel's of alpha 1/255 (worldgen's),
- * well above f16's least normal, and at most a few dozen; 0, none.
+ * Optical depths, a channel's in 10 bits from red's in the lowest, as
+ * compositor.wgsl's `depths` takes them: DEPTH_STEPS a doubling from
+ * 2^−DEPTH_LEAST, each within 1.5 % from a voxel's of alpha 1/255
+ * (worldgen's) to past what lets anything through; 0, none.
  */
-fn f16_bits(v: f32) -> u32 {
-    if v <= 0.0 {
-        return 0;
-    }
-    let bits = v.to_bits();
-    let exponent = ((bits >> 23) & 0xff) as i32 - 127 + 15;
-    assert!((1..31).contains(&exponent), "an optical depth of {v}");
-    // Rounded to nearest: a carry into the exponent is right.
-    let mantissa = (bits & 0x7f_ffff) + 0x1000;
-    ((exponent as u32) << 10) + (mantissa >> 13)
+fn depth_bits(depth: [f32; 3]) -> u32 {
+    let bits = |d: f32| if d > 0.0 { ((d.log2() + DEPTH_LEAST) * DEPTH_STEPS).round().clamp(1.0, 1023.0) as u32 } else { 0 };
+    bits(depth[0]) | bits(depth[1]) << 10 | bits(depth[2]) << 20
 }
+const DEPTH_STEPS: f32 = 48.0;
+const DEPTH_LEAST: f32 = 14.0;
 
 /** The corners of a box. */
 fn corners(min: [f64; 2], max: [f64; 2]) -> [[f64; 2]; 4] {
@@ -647,7 +643,7 @@ struct Targets {
     size: [u32; 2],
     picture: wgpu::Texture,
     depth: wgpu::Texture,
-    /** The pictures of medium, one over another: their colour as much as they stop, and how much (veil_fragment). */
+    /** The picture, finer than its format, with the pictures of medium laid on it (veil_fragment). */
     veil: wgpu::Texture,
     composite: wgpu::BindGroup,
     /** The pyramid of farthest depths, and per level a bind group to make it and its size. */
@@ -667,8 +663,9 @@ struct Pipelines {
     composite: wgpu::BindGroupLayout,
     place: wgpu::BindGroupLayout,
     scatter: wgpu::BindGroupLayout,
-    /** The pictures of whole voxels; then the pictures of medium one over another, and those over the picture. */
+    /** The pictures of whole voxels; then the picture into the veil, the pictures of medium laid on it, and it back. */
     flat: wgpu::RenderPipeline,
+    under_veils: wgpu::RenderPipeline,
     veil: wgpu::RenderPipeline,
     composite_picture: wgpu::RenderPipeline,
     sky: wgpu::RenderPipeline,
@@ -930,10 +927,8 @@ impl Pipelines {
         let target = |format, blend| Some(wgpu::ColorTargetState { format, blend, write_mask: wgpu::ColorWrites::ALL });
         let blend = |src_factor, dst_factor| wgpu::BlendComponent { src_factor, dst_factor, operation: wgpu::BlendOperation::Add };
         use wgpu::BlendFactor as F;
-        // Over what is drawn before, as much as it stops: its colour premultiplied by that.
-        let over_veils = wgpu::BlendState { color: blend(F::One, F::OneMinusSrcAlpha), alpha: blend(F::One, F::OneMinusSrcAlpha) };
-        // Over the picture: their colour, and the picture as much as they let through.
-        let over_picture = wgpu::BlendState { color: blend(F::One, F::SrcAlpha), alpha: blend(F::Zero, F::One) };
+        // On what is drawn before: what it sends, and that times what it lets through, each channel apart (veil_fragment).
+        let over_veils = wgpu::BlendState { color: blend(F::One, F::Src1), alpha: blend(F::One, F::Src1) };
         let render = |layout: &wgpu::BindGroupLayout,
                       vertex: &str,
                       fragment: &str,
@@ -969,15 +964,9 @@ impl Pipelines {
         };
         Pipelines {
             flat: render(&draw, "flat_vertex", "flat_fragment", &[], tested.clone(), &[target(format, None)]),
+            under_veils: render(&show, "show_vertex", "show_fragment", &[], over.clone(), &[target(VEIL, None)]),
             veil: render(&draw, "veil_vertex", "veil_fragment", &[], behind, &[target(VEIL, Some(over_veils))]),
-            composite_picture: render(
-                &composite,
-                "sky_vertex",
-                "composite_fragment",
-                &[],
-                over.clone(),
-                &[target(format, Some(over_picture))],
-            ),
+            composite_picture: render(&composite, "sky_vertex", "composite_fragment", &[], over.clone(), &[target(format, None)]),
             sky: render(&draw, "sky_vertex", "sky_fragment", &[], tested, &[target(format, None)]),
             seams: render(&draw, "sky_vertex", "seams_fragment", &[], over, &[target(format, Some(wgpu::BlendState::ALPHA_BLENDING))]),
             show_picture: render(&show, "show_vertex", "show_fragment", &[], None, &[target(format, None)]),
@@ -1064,7 +1053,8 @@ impl Compositor {
     /** For a target of `format`; `culls` off, it draws every cluster in view (compositor.wgsl). */
     pub fn new(device: &wgpu::Device, format: wgpu::TextureFormat, culls: bool) -> Compositor {
         use wgpu::BufferUsages as U;
-        let draws = |label| buffer(device, label, (1 << 20).min(device.limits().max_buffer_size), U::STORAGE | U::INDIRECT | U::COPY_SRC);
+        let draws =
+            |label, size: u64| buffer(device, label, size.min(device.limits().max_buffer_size), U::STORAGE | U::INDIRECT | U::COPY_SRC);
         Compositor {
             format,
             pipelines: Pipelines::new(device, format, culls),
@@ -1080,7 +1070,8 @@ impl Compositor {
             held_back: false,
             going: Vec::new(),
             veils: 0,
-            draws: [draws("draws first"), draws("draws next"), draws("veils")],
+            // A cluster's draw each, a picture of medium's one a half.
+            draws: [draws("draws first", 1 << 20), draws("draws next", 1 << 20), draws("veils", 2 << 20)],
             veils_drawn: buffer(device, "veils drawn", 4, U::STORAGE | U::INDIRECT | U::COPY_DST),
             blocks: ["blocks first", "blocks next"]
                 .map(|label| buffer(device, label, 1 << 12, U::STORAGE | U::INDIRECT | U::COPY_DST | U::COPY_SRC)),
@@ -1395,7 +1386,8 @@ impl Compositor {
      * from the camera (place in compositor.wgsl); the runs of pictures
      * that showed last frame, then those that show now that did not, culled
      * against the farthest depths of the first; then the pictures of
-     * medium in front of them, far to near, and those over the picture.
+     * medium in front of them laid on the picture, a half of a slab at a
+     * time, far to near.
      */
     pub fn render(&self, encoder: &mut wgpu::CommandEncoder) {
         let t = self.targets.as_ref().expect("prepared");
@@ -1472,11 +1464,14 @@ impl Compositor {
             encoder.copy_buffer_to_buffer(&self.found, 0, &self.readback, 0, self.found.size());
         }
         if self.veils > 0 {
-            // None yet.
-            let mut veil = pass(encoder, &[(&t.veil, Some(wgpu::Color::TRANSPARENT))], (&t.depth, None));
+            // The picture under them, finer than its own format while they are laid on it.
+            let mut veil = pass(encoder, &[(&t.veil, None)], (&t.depth, None));
+            veil.set_pipeline(&p.under_veils);
+            veil.set_bind_group(0, &t.show, &[]);
+            veil.draw(0..4, 0..1);
             veil.set_bind_group(0, self.draw_group.as_ref(), &[]);
             veil.set_pipeline(&p.veil);
-            veil.multi_draw_indirect_count(&self.draws[VEILS], 0, &self.veils_drawn, 0, self.clusters.top);
+            veil.multi_draw_indirect_count(&self.draws[VEILS], 0, &self.veils_drawn, 0, 2 * self.clusters.top);
         }
         let mut pass = pass(encoder, &[(&t.picture, None)], (&t.depth, None));
         if self.veils > 0 {

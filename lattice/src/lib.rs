@@ -342,6 +342,11 @@ impl Grid {
         words_of(&self.stops, STOPS_WORDS, i).map_or(look([alpha; 3], 0), |w| w[0])
     }
 
+    /** What the see-through voxel at site (x, y, z) stops of each channel, a byte each as a look's colour (`stops_at`); 0 if empty or outside. */
+    pub fn stops(&self, x: i32, y: i32, z: i32) -> Look {
+        self.index(x, y, z).map_or(0, |i| self.stops_at(i))
+    }
+
     /** Whether any site at `sites` (indices in `cells`) stops channels unlike. */
     pub fn has_stops(&self, sites: std::ops::Range<usize>) -> bool {
         has(&self.stops, STOPS_WORDS, sites)

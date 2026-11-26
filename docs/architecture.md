@@ -188,7 +188,7 @@ the picture to the same one with the world and the eye moved by a vector of the 
 that is not one of the bricks' (`voxels_look_the_same_wherever_the_bricks_fall`),
 a slab of medium to exp(−extinction · path),
 and each channel to its own
-(`a_medium_of_voxels_stops_more_of_the_channels_its_colour_is_darker_in`).
+(`a_medium_stops_more_of_the_channels_its_colour_is_darker_in`, either engine).
 
 The panel picks the lighting apart from the engine (`Lighting`):
 voxels shaded by the way their faces face, or computed,
@@ -300,9 +300,18 @@ and depth decides where neighbours overlap
 A surface along the axis is a row or two of columns
 whose pillars run through the cell, and is smeared over its depth.
 See-through voxels are pictures of their cell's medium, slab by slab of its columns
-(`cell_medium`, `veils`), each column's colour and optical depth,
-drawn see-through over what is behind, far to near
-(`a_flat_medium_lets_through_as_much_as_its_extinction_says`).
+(`cell_medium`, `veils`).
+A half of a slab of a column is a see-through voxel of its own:
+what a ray along the axis gets of its voxels, near to far,
+each channel's colour and optical depth (`Half`).
+So it adds up as they do, whatever its depth,
+and a level's halves show what a finer level's do
+(`halves_of_any_depth_add_up_as_their_voxels_do`).
+The halves are laid on the picture far to near,
+each sending its colour and letting through the rest, channel by channel,
+as the voxels engine's rays take a medium
+(dual-source blending, `veil_fragment`;
+`a_flat_medium_lets_through_as_much_as_its_extinction_says`).
 
 **The compositor** (`native/src/engine/chunks/compositor.rs`) draws only what may show.
 A chunk's picture is runs of its rows' columns, a quad each,

@@ -14,7 +14,7 @@ use face::{FACES, Face, faces};
 use lattice::light::Lighting;
 use lattice::{ALPHA, BRICK, Look, Tiles, VOXEL_FACES, alpha_of, facing, whole_or_none};
 use lod::CellChunk;
-pub use pillars::Medium;
+pub use pillars::{Half, Medium};
 use pillars::{Voxel, cell_medium, cell_relief, lit_voxel_colour, seen, voxel_colour};
 
 /**
@@ -183,8 +183,10 @@ impl Baker {
                         });
                         let n = facing.len() as u32;
                         let [r, g, b] = sum.map(|c| ((c + n / 2) / n) as u8);
+                        let [sr, sg, sb, _] = grid.stops(x, y, z).to_le_bytes();
+                        let stops = if whole { [ALPHA; 3] } else { [sr, sg, sb] };
                         let look = u32::from_le_bytes([r, g, b, alpha_of(look)]);
-                        voxels.push(Voxel { site: face.of(p), look, open, cut });
+                        voxels.push(Voxel { site: face.of(p), look, stops, open, cut });
                     }
                 }
             }
