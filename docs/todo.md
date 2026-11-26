@@ -154,6 +154,11 @@ Numbers are for the forest at 1280×800, as measured when written.
   Under the surface nearly every put is a whole site of the ground's fill,
   each through `put`, its brick looked up, at level 0 its shade hashed.
   A line's run of them put brick by brick would spare most of that.
+  Each also has its pick hashed (`picked` in `drawables.rs`, `draw_shape`),
+  which only a site put in part reads.
+- **Tiles made together are copied twice.**
+  `parted` makes one `Grid` of them all (`to_grid`),
+  then copies each brick again into its tile's (`Grid::part`).
 - **Sites unlike through their faces are the dearest to put.**
   A seventh of the valley's sites are in `views` (`VoxelGrid`),
   which take as much as all the sites' pieces,
@@ -519,7 +524,8 @@ Numbers are for the forest at 1280×800, as measured when written.
   The rest is every function alike taking longer on shared cores
   (four virtual ones, a software GPU beside them): not looked into.
   A lock on each of a plan's slots cost one thread a tenth of generating,
-  as much as four gained: so `Kept` in `ground/src/plan.rs` reads without one, unsafely.
+  as much as four gained: so `Kept` in `worldgen/src/recent.rs` reads without one, unsafely,
+  for plans and points alike.
   Tiles side by side still make again the things reaching both;
   those one above another are made together (`made_with`).
 - **A `Large` never forgets** (`ground/src/plan.rs`): it holds each piece of a curve for good,

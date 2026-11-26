@@ -2,9 +2,9 @@
 //! looks like, in bricks BRICK units wide, only bricks with voxels stored.
 //! The same layout as the baker's Grid, which `to_grid` hands over.
 
-use std::sync::{LazyLock, OnceLock};
+use std::sync::OnceLock;
 
-use lattice::{FACE_KINDS, Look, VIEW_WORDS};
+use lattice::{FACE_KINDS, Look};
 
 use crate::js;
 
@@ -107,13 +107,10 @@ pub struct Faces<T> {
     which: [u8; FACE_KINDS],
 }
 
-/** By axis, which way each face faces along it (`along`): 0 back, 1 across it, 2 forth. */
-static WAYS: LazyLock<[Faces<usize>; 3]> = LazyLock::new(|| [0, 1, 2].map(|axis| Faces::by(|k| (VOXEL_FACES[k][axis] + 1) as usize)));
-
 impl<T: Copy + Default + PartialEq> Faces<T> {
     /** Each face's value by which way it faces along `axis`: of `ways`, those facing back (−), across it (0) and forth (+). */
     pub fn along(axis: usize, ways: [T; 3]) -> Faces<T> {
-        WAYS[axis].map(|way| ways[way])
+        Faces::by(|k| ways[(VOXEL_FACES[k][axis] + 1) as usize])
     }
 
     /** Each face's value, `value` of it. */
@@ -168,13 +165,12 @@ impl<T: Copy + Default + PartialEq> Faces<T> {
         other: &Faces<U>,
         mut f: impl FnMut(T, U) -> V,
     ) -> Faces<V> {
-        // Of values each once, so are their pairs: where either is alike through every face, they are the other's.
-        let pairs = match (self.n, other.n) {
-            (1, n) => Faces { of: std::array::from_fn(|b| (0, b as u8)), n, which: other.which },
-            (n, 1) => Faces { of: std::array::from_fn(|a| (a as u8, 0)), n, which: self.which },
-            _ => Faces::by(|k| (self.which[k], other.which[k])),
-        };
-        pairs.map(|(a, b)| f(self.of[a as usize], other.of[b as usize]))
+        // Where either is alike through every face, each pair is that one value and the other's: the other, mapped.
+        match (self.n, other.n) {
+            (1, _) => other.map(|u| f(self.of[0], u)),
+            (_, 1) => self.map(|t| f(t, other.of[0])),
+            _ => Faces::by(|k| (self.which[k], other.which[k])).map(|(a, b)| f(self.of[a as usize], other.of[b as usize])),
+        }
     }
 
     /** Where `value` is among its values, added if not. */
@@ -812,7 +808,8 @@ impl VoxelGrid {
             }
             keep.push(looks.iter().any(|&c| c != 0) || self.glow.brick(at).next().is_some());
         }
-        let mut moved = vec![None; keep.len()];
+        // By brick here, where it is in the grid, in bricks; and those it holds, in its order.
+        let (mut moved, mut order) = (vec![None; keep.len()], Vec::new());
         let mut grid = Grid::new(self.min.map(|v| v as i32), self.n.map(|v| v as i32), 0);
         for (place, &at) in self.bricks.iter().enumerate() {
             let Ok(at) = usize::try_from(at) else { continue };
@@ -821,6 +818,7 @@ impl VoxelGrid {
             }
             let to = *moved[at].get_or_insert_with(|| {
                 let to = grid.cells.len() / BRICK_SITES;
+                order.push(at);
                 grid.cells.extend_from_slice(&looks[at * BRICK_SITES..][..BRICK_SITES]);
                 // More than half of its rays stopped by what stops a body: one stands on it.
                 let solid = |i: usize| self.solid[at * BRICK_SITES + i] > ALPHA / 2;
@@ -829,27 +827,37 @@ impl VoxelGrid {
             });
             grid.bricks[place] = to as i32;
         }
-        let to = |i: usize| moved[i / BRICK_SITES].map(|to| (to * BRICK_SITES + i % BRICK_SITES) as u32);
-        fn sorted<const WORDS: usize>(mut sites: Vec<[u32; WORDS]>) -> Vec<u32> {
-            sites.sort_unstable_by_key(|w| w[0]);
-            sites.into_flattened()
+        // The rest brick by brick in the grid's order, each brick's sites in theirs: by their index there, as the grid
+        // holds them, with nothing to sort.
+        // A site's views as hosts are handed them, each sight once; a run of like sites (a level's means) handed once.
+        let mut last: Option<(Site, Faces<Sight>, Faces<Look>)> = None;
+        for (to, &at) in order.iter().enumerate() {
+            let to = |i: usize| (to * BRICK_SITES + i % BRICK_SITES) as u32;
+            for (i, &seen) in self.views.seen.brick(at) {
+                let (site, views) = (self.site(i), faces(&self.views.sights, seen));
+                let looks = match &last {
+                    Some((was, seen, looks)) if (*was, *seen) == (site, views) => *looks,
+                    _ => last.insert((site, views, views.map(|sight| site.handed(Some(sight))))).2,
+                };
+                if looks.each().len() > 1 {
+                    grid.views.push(to(i));
+                    grid.views.extend((0..FACE_KINDS).map(|k| looks.get(k)));
+                }
+            }
+            for (i, g) in self.glow.brick(at) {
+                grid.glow.extend([to(i), g[0], g[1], g[2]]);
+            }
+            // Of the bricks that hold a medium only: few do.
+            if self.medium.brick(at).is_some() {
+                for (i, &look) in looks.iter().enumerate().skip(at * BRICK_SITES).take(BRICK_SITES) {
+                    let site = self.site(i);
+                    let [r, g, b] = site.seen(site.pieces).0;
+                    if lattice::medium(look) && (r != g || g != b) {
+                        grid.stops.extend([to(i), lattice::look([r, g, b], 0)]);
+                    }
+                }
+            }
         }
-        // As `view` gives them, each sight once.
-        let view = |(i, views): (usize, Faces<Sight>)| -> Option<[u32; VIEW_WORDS]> {
-            let (to, site) = (to(i)?, self.site(i));
-            let looks = views.map(|sight| site.handed(Some(sight)));
-            (looks.each().len() > 1).then(|| std::array::from_fn(|w| if w == 0 { to } else { looks.get(w - 1) }))
-        };
-        grid.views = sorted(self.views.iter().filter_map(view).collect());
-        grid.glow = sorted(self.glow.iter().filter_map(|(i, g)| Some([to(i)?, g[0], g[1], g[2]])).collect());
-        // Of the bricks that hold a medium only: few do.
-        let held = (0..self.sites() / BRICK_SITES).filter(|&at| self.medium.brick(at).is_some());
-        let stops = |i: usize| {
-            let site = self.site(i);
-            let [r, g, b] = site.seen(site.pieces).0;
-            (lattice::medium(looks[i]) && (r != g || g != b)).then(|| Some([to(i)?, lattice::look([r, g, b], 0)])).flatten()
-        };
-        grid.stops = sorted(held.flat_map(|at| at * BRICK_SITES..(at + 1) * BRICK_SITES).filter_map(stops).collect());
         grid
     }
 }
