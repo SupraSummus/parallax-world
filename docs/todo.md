@@ -453,6 +453,12 @@ Numbers are for the forest at 1280×800, as measured when written.
   sites that hold what they stop along each direction, boxes' too
   ("Cells hold what they look like", above);
   then coarser levels taking more directions (in Ideas).
+- **Thin walls kept the sky out of sheds along the lattice; nothing else was measured since**
+  ([light.md](light.md), "Thin walls").
+  Not walls slanted to it, nor the valley's railway tunnel,
+  which was lit hundreds of times too bright before.
+  A shed of cuboids turned about y would say the first,
+  as the reference's roof is turned.
 - **Light settles slowly in what reflects most of it, spread wide.**
   There a site takes tens of rounds,
   each reading the coarsest level a line's length further round;

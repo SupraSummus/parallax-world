@@ -22,13 +22,13 @@ or more where the coarser fills what it leaves empty.
 So light from D away comes from a level whose sites are about D across,
 which keeps what a region stops on average (the contract),
 not whether it is closed:
-walls thinner than the space they close let light in,
+walls thinner than the space they close may let light in ("Thin walls"),
 openings smaller than it let none (the door and the window below).
 
 A railway tunnel, under 1 to 4 m of rock where its hill is low,
-is lit through it from the sky,
-as the reference's tunnel under a thin roof is,
-its middle hundreds of times too bright.
+was lit through it from the sky, its middle hundreds of times too bright;
+not measured since "Thin walls".
+The reference's tunnel under a thin roof is half as bright as it should be in its middle.
 
 Columns put a whole site where its middle was in a span,
 so the coarse levels lost a roof thinner than their spacing
@@ -36,7 +36,7 @@ along some directions
 (their solid spans cover their sites in part now; the tunnel was not lit anew);
 and taking over, a coarser level's light comes from the face of its cube
 the line leaves by, between it and the 3 beside it in its plane
-(bilinear, weighed by how much each site lets through),
+(bilinear, weighed by how much each site, and the finer site towards it, lets through),
 what lies between there and where it took over unread:
 the same hand-off at every level of the octree.
 
@@ -47,6 +47,31 @@ The sun is one of the 18 directions.
 Light taken over from a coarser level's single site was blocky,
 a step at each coarse cube's face;
 read between the four faces, it is smooth.
+
+## Thin walls
+
+Sheds closed by cuboids thinner than the coarse levels' sites,
+some off the lattice, keep the sky out, as the reference does
+(`thin_walls_keep_the_sky_out`).
+They let in a tenth to a third of open ground's light, whatever the steps a level,
+till two changes, which cost no time:
+
+- a site is seen through the faces a line comes into it by (`meets`),
+  past an edge through the one of two that stops more:
+  the line crosses a wall in one of the sites it meets there.
+  Seen through one face fixed by direction,
+  a wall across z stopped a thirtieth of a line along (0, 1, 1);
+  through both on average, the roof leaked as the walls had;
+- taking over, a coarser site beside the line's is read
+  only as far as the finer site towards it lets light through
+  (`towards` in `coarser`), so not past a wall:
+  that let a tenth of the sky into the shed's middle.
+
+Not looked at: walls slanted to the lattice, and their corners,
+where lines cross sites that each stop part of a wall.
+Tried before those changes,
+each site's share along an axis made of its children's, lane by lane,
+one to three levels down: no less light in the sheds.
 
 ## Where it is to go, and what was tried
 
@@ -124,8 +149,8 @@ on its walls, measured by hand, light is a third over the reference;
 drawn as a medium, a sixth under.
 Light reads the two unlike; the contract does not tell them apart.
 
-A site met reflects the light on its one face turned back,
-a third of what it shows that way.
+A site met reflects the light on the face it is seen through,
+a third of what it shows that way (`meets`; "Thin walls", below).
 
 Tried: the light on all the faces it shows, each by its share:
 no closer to the reference.
