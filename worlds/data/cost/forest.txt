@@ -1,62 +1,62 @@
 # forest (seed 42): work by tile and layer (worldgen::cost)
 place        level    points    inside     nodes    shapes     tests  measured     reads   lookups     plans  distinct   largest layer
 spawn            0         0         0         0         0         0         0     16384    186000         0         0         0 terrain
-spawn            0        22        20        10         0     19676         0         0       947         0         0      6648 trees
+spawn            0        24        21        12         0     18847         0         0       901         0         0      6648 trees
 spawn            0         4         0         0         0         0         0         0       173         0         0         0 boulders
 spawn            0         1         0         0         0         0         0         0       122         0         0         0 logs
 spawn            0       144       121        78         0     18409         0         0      3600         0         0      2832 plants
-spawn            0         0         0         0         0         0         0         0         0     20482     20476         0 plan ground
-spawn            0         0         0         0         0         0         0         0         0       336       336         0 plan path
+spawn            0         0         0         0         0         0         0         0         0     20562     20560         0 plan ground
+spawn            0         0         0         0         0         0         0         0         0       352       352         0 plan path
 spawn            0         0         0         0         0         0         0         0       108        12        12         0 plan path's stretch
-spawn            0         0         0         0         0         0         0         0     63487     19828     19827         0 plan forest columns
-spawn            0         0         0         0         0         0         0         0      6757      1829      1829         0 plan trees
-spawn            0         0         0         0         0         0         0         0         0        25        25         0 plan boulders
-spawn            0         0         0         0         0         0         0         0         0        49        49         0 plan logs
+spawn            0         0         0         0         0         0         0         0     63597     19755     19755         0 plan forest columns
+spawn            0         0         0         0         0         0         0         0      5980      1744      1744         0 plan trees
+spawn            0         0         0         0         0         0         0         0         0        16        16         0 plan boulders
+spawn            0         0         0         0         0         0         0         0         0        36        36         0 plan logs
 spawn            1         0         0         0         0         0         0     14336    163472         0         0         0 terrain
-spawn            1        63        62        11         0      2322         0         0      2310         0         0       752 trees
+spawn            1        66        65        12         0      2229         0         0      2345         0         0       718 trees
 spawn            1         8         2         2         0      7464         0         0       162         0         0      6528 boulders
 spawn            1         2         0         0         0         0         0         0       230         0         0         0 logs
 spawn            1       400       336       158         0     32444         0         0      9526         0         0      1048 plants
-spawn            1         0         0         0         0         0         0         0         0     21260     21232         0 plan ground
-spawn            1         0         0         0         0         0         0         0         0       391       391         0 plan path
-spawn            1         0         0         0         0         0         0         0       126        14        14         0 plan path's stretch
-spawn            1         0         0         0         0         0         0         0     64977     19828     19827         0 plan forest columns
-spawn            1         0         0         0         0         0         0         0      9438      2549      2549         0 plan trees
-spawn            1         0         0         0         0         0         0         0         0        49        49         0 plan boulders
-spawn            1         0         0         0         0         0         0         0         0        81        81         0 plan logs
+spawn            1         0         0         0         0         0         0         0         0     21823     21807         0 plan ground
+spawn            1         0         0         0         0         0         0         0         0       441       441         0 plan path
+spawn            1         0         0         0         0         0         0         0       135        15        15         0 plan path's stretch
+spawn            1         0         0         0         0         0         0         0     66307     20076     20076         0 plan forest columns
+spawn            1         0         0         0         0         0         0         0      8770      2544      2544         0 plan trees
+spawn            1         0         0         0         0         0         0         0         0        36        36         0 plan boulders
+spawn            1         0         0         0         0         0         0         0         0        64        64         0 plan logs
 spawn            2         0         0         0         0         0         0      8192     95888         0         0         0 terrain
-spawn            2       203       203        24         0     11067         0         0      6364         0         0      1088 trees
-spawn            2        19         3         2         0       960         0         0       204         0         0       768 boulders
-spawn            2        10         3         3         0         0         0         0       531         0         0         0 logs
-spawn            2         0         0         0         0         0         0         0         0     20938     20618         0 plan ground
-spawn            2         0         0         0         0         0         0         0         0       606       606         0 plan path
+spawn            2       205       205        25         0     11612         0         0      6337         0         0      1065 trees
+spawn            2        19         3         2         0       960         0         0       206         0         0       768 boulders
+spawn            2        10         3         3         0         0         0         0       534         0         0         0 logs
+spawn            2         0         0         0         0         0         0         0         0     21347     21229         0 plan ground
+spawn            2         0         0         0         0         0         0         0         0       645       645         0 plan path
 spawn            2         0         0         0         0         0         0         0       180        20        20         0 plan path's stretch
-spawn            2         0         0         0         0         0         0         0     45348     13856     13856         0 plan forest columns
-spawn            2         0         0         0         0         0         0         0     18976      5105      5105         0 plan trees
-spawn            2         0         0         0         0         0         0         0         0       121       121         0 plan boulders
-spawn            2         0         0         0         0         0         0         0         0       169       169         0 plan logs
+spawn            2         0         0         0         0         0         0         0     46101     13723     13721         0 plan forest columns
+spawn            2         0         0         0         0         0         0         0     17348      5008      5008         0 plan trees
+spawn            2         0         0         0         0         0         0         0         0       100       100         0 plan boulders
+spawn            2         0         0         0         0         0         0         0         0       144       144         0 plan logs
 spawn            3         0         0         0         0         0         0      8192     92048         0         0         0 terrain
-spawn            3       692       673        63         0     14711         0         0     20051         0         0       634 trees
-spawn            3        46         5         3         0       136         0         0       334         0         0       120 boulders
-spawn            3        36         6         5         0       191         0         0       774         0         0        60 logs
-spawn            3         0         0         0         0         0         0         0         0     28383     27026         0 plan ground
-spawn            3         0         0         0         0         0         0         0         0      1016      1016         0 plan path
+spawn            3       697       676        65         0     15663         0         0     19937         0         0       770 trees
+spawn            3        46         5         3         0       136         0         0       336         0         0       120 boulders
+spawn            3        36         6         5         0       191         0         0       773         0         0        60 logs
+spawn            3         0         0         0         0         0         0         0         0     27150     26331         0 plan ground
+spawn            3         0         0         0         0         0         0         0         0      1065      1065         0 plan path
 spawn            3         0         0         0         0         0         0         0       252        28        28         0 plan path's stretch
-spawn            3         0         0         0         0         0         0         0     66540     20330     20328         0 plan forest columns
-spawn            3         0         0         0         0         0         0         0     40621     10913     10913         0 plan trees
-spawn            3         0         0         0         0         0         0         0         0       361       361         0 plan boulders
-spawn            3         0         0         0         0         0         0         0         0       441       441         0 plan logs
+spawn            3         0         0         0         0         0         0         0     68171     20054     20053         0 plan forest columns
+spawn            3         0         0         0         0         0         0         0     37244     10704     10704         0 plan trees
+spawn            3         0         0         0         0         0         0         0         0       324       324         0 plan boulders
+spawn            3         0         0         0         0         0         0         0         0       400       400         0 plan logs
 spawn            4         0         0         0         0         0         0     16384    182160         0         0         0 terrain
-spawn            4         0         0         0         0         0         0     16384    120952         0         0         0 trees
-spawn            4       181        14         9         0       112         0         0       937         0         0        36 boulders
-spawn            4       107        12         8         0       743         0         0      1614         0         0       144 logs
-spawn            4         0         0         0         0         0         0         0         0     46690     43409         0 plan ground
-spawn            4         0         0         0         0         0         0         0         0      1225      1225         0 plan boulders
-spawn            4         0         0         0         0         0         0         0         0      1826      1826         0 plan path
+spawn            4         0         0         0         0         0         0     16384    120725         0         0         0 trees
+spawn            4       181        14         9         0       112         0         0       941         0         0        36 boulders
+spawn            4       107        12         8         0       743         0         0      1616         0         0       144 logs
+spawn            4         0         0         0         0         0         0         0         0     28504     27208         0 plan ground
+spawn            4         0         0         0         0         0         0         0         0      1156      1156         0 plan boulders
+spawn            4         0         0         0         0         0         0         0         0      1829      1829         0 plan path
 spawn            4         0         0         0         0         0         0         0       360        40        40         0 plan path's stretch
-spawn            4         0         0         0         0         0         0         0         0      1369      1369         0 plan logs
-spawn            4         0         0         0         0         0         0         0    151004     44983     42675         0 plan forest columns
-spawn            4         0         0         0         0         0         0         0    101000     27055     23409         0 plan trees
+spawn            4         0         0         0         0         0         0         0         0      1296      1296         0 plan logs
+spawn            4         0         0         0         0         0         0         0     93049     26754     25945         0 plan forest columns
+spawn            4         0         0         0         0         0         0         0     91631     26272     23104         0 plan trees
 spawn            5         0         0         0         0         0         0     16384    182160         0         0         0 terrain
 spawn            5         0         0         0         0         0         0     16384     98140         0         0         0 trees
 spawn            5         0         0         0         0         0         0         0         0     18131     18125         0 plan ground

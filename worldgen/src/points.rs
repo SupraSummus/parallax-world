@@ -9,19 +9,19 @@
 //! a child's weight times its leaves still free, so leaves take one each
 //! while there is room; a leaf's stand where their mark has a chance.
 //!
-//! A leaf weighs the chances at its corners, a cell its leaves. So a cell
-//! with a point has a leaf with a corner with a chance, as has the child
-//! holding that leaf, down to it: a point never comes down to where its
-//! mark has none. And a cell's counts are its children's, added, by
-//! construction: far forms read the things that stand. It costs a cell
-//! its leaves' corners, sites of the levels whose sites are at most a
-//! leaf apart.
+//! A leaf weighs the chances at its site, a cell its leaves. So a cell
+//! with a point has a leaf with a chance, as has the child holding that
+//! leaf, down to it: a point never comes down to where its mark has none.
+//! And a cell's counts are its children's, added, by construction: far
+//! forms read the things that stand. A leaf's site is where the level
+//! whose sites are a leaf apart reads (sites::middle): that level reads
+//! the columns weighing it costs.
 
 use std::sync::{Arc, Mutex};
 
 use crate::cost;
 use crate::js;
-use crate::noise::{Fixed, Fx, Rng, hash_text, hash64, unit};
+use crate::noise::{Fixed, Fx, Rng, float, hash_text, hash64, unit};
 use crate::sites;
 
 /** The most marks a process draws: kinds of things, each with chances of its own. */
@@ -44,7 +44,7 @@ pub struct Spot {
     pub nth: u32,
 }
 
-/** Positions a leaf tries for a point, at random, before it stands at the corner whose chance let it in. */
+/** Positions a leaf tries for a point, at random, before it stands at its site, whose chance let it in. */
 const TRIES: u32 = 16;
 
 /** Slots each cache keeps values in, the last made in each: enough for a host tile's cells at any level. */
@@ -94,7 +94,8 @@ pub struct Points {
     pub root: i64,
     marks: usize,
     chances: Box<dyn Fn([i64; 3]) -> Chances + Send + Sync>,
-    corners: Slots<[i64; 3], Chances>,
+    /** By leaf, the chances at its site. */
+    sites: Slots<[i64; 3], Chances>,
     /** By cell, its counts. */
     counted: Slots<(i64, [i64; 3]), Counts>,
     /** By leaf holding any, its points, placed: each costs reading its chances up to TRIES times. */
@@ -107,7 +108,7 @@ impl Points {
      * to roots `root` wide, with `chances` at each point (lattice units;
      * 0 along the other axes): by mark, the chance a leaf there holds a
      * point of it. Where they vary within a leaf, the points follow its
-     * corners, so leaves want to be no wider than they vary over.
+     * site, so leaves want to be no wider than they vary over.
      */
     pub fn new(
         name: &'static str,
@@ -134,7 +135,7 @@ impl Points {
             root,
             marks,
             chances: Box::new(chances),
-            corners: Slots::new(SLOTS),
+            sites: Slots::new(SLOTS),
             counted: Slots::new(SLOTS),
             placed: Slots::new(SLOTS),
         }
@@ -181,19 +182,23 @@ impl Points {
         slot
     }
 
-    /** The chances at a point, kept. */
-    fn chances_at(&self, at: [i64; 3]) -> Chances {
-        self.corners.get(self.slot(self.leaf, at), at, || cost::plan(self.name, self, at, || self.chances(at)))
+    /** The site of the leaf at `leaf`: where the level whose sites are a leaf apart reads it, on the axes spanned. */
+    fn site(&self, leaf: [i64; 3]) -> [i64; 3] {
+        [0, 1, 2].map(|a| leaf[a] + if self.spans[a] { sites::middle(self.leaf) } else { 0 })
     }
 
-    /** By mark, the weight of the cell `size` wide at `corner`: its leaves' corners' chances, added (fixed point). */
+    /** The chances at the site of the leaf at `leaf`, kept. */
+    fn chances_at(&self, leaf: [i64; 3]) -> Chances {
+        let at = self.site(leaf);
+        self.sites.get(self.slot(self.leaf, leaf), leaf, || cost::plan(self.name, self, at, || self.chances(at)))
+    }
+
+    /** By mark, the weight of the cell `size` wide at `corner`: its leaves' chances, added (fixed point). */
     fn weights(&self, size: i64, corner: [i64; 3]) -> [Fixed; MARKS] {
         let mut sum = [0; MARKS];
         for leaf in self.cells_in(self.leaf, corner, corner.map(|v| v + size)) {
-            for at in self.corners_of(self.leaf, leaf) {
-                let chances = self.chances_at(at);
-                (0..self.marks).for_each(|m| sum[m] += chances[m].max(Fx::ZERO).to_bits());
-            }
+            let chances = self.chances_at(leaf);
+            (0..self.marks).for_each(|m| sum[m] += chances[m].max(Fx::ZERO).to_bits());
         }
         sum
     }
@@ -223,7 +228,7 @@ impl Points {
             if size == self.root {
                 let weights = self.weights(size, corner);
                 return std::array::from_fn(|m| {
-                    let mean = weights[m] as f64 / (1u64 << (16 + self.dims)) as f64;
+                    let mean = float(weights[m]);
                     let h = hash64(self.seed, corner[0], corner[1], corner[2] ^ ((m as i64) << 56));
                     poisson(mean, unit((h >> 32) as u32))
                 });
@@ -298,8 +303,8 @@ impl Points {
     /**
      * The points of the leaves meeting [min, max) along the axes spanned
      * (lattice units): each where it stands, evenly where its mark has a
-     * chance in its leaf, or at the corner of its leaf whose chance let
-     * it in, if TRIES positions found none.
+     * chance in its leaf, or at its leaf's site, whose chance let it in,
+     * if TRIES positions found none.
      */
     pub fn points_in(&self, min: [i64; 3], max: [i64; 3]) -> Vec<Spot> {
         let mut spots = Vec::new();
@@ -323,7 +328,8 @@ impl Points {
                     (self.chances(at)[mark] > Fx::ZERO).then_some(at)
                 });
                 let at = tried.unwrap_or_else(|| {
-                    self.corners_of(self.leaf, leaf).find(|c| self.chances_at(*c)[mark] > Fx::ZERO).expect("a corner let it in")
+                    assert!(self.chances_at(leaf)[mark] > Fx::ZERO, "points {}: no chance let it in", self.name);
+                    self.site(leaf)
                 });
                 spots.push(Spot { at, mark, leaf, nth });
             }
@@ -462,13 +468,13 @@ impl Rooms {
         spots
     }
 
-    /** The points in a block, kept: of the leaves meeting it or a leaf below, as a point may stand at its leaf's far corner. */
+    /** The points in a block, kept. */
     fn block(&self, block: [i64; 3]) -> Arc<[Spot]> {
         let axes = &self.points.axes[..self.points.dims as usize];
         let slot = axes.iter().fold(0, |slot, &a| slot * 2 * BLOCKS + block[a].rem_euclid(2 * BLOCKS)) as usize;
         self.blocks.get(slot, block, || {
             let (min, max) = (block.map(|b| b * self.reach), block.map(|b| (b + 1) * self.reach));
-            let mut spots = self.points.points_in(min.map(|v| v - self.points.leaf), max);
+            let mut spots = self.points.points_in(min, max);
             spots.retain(|s| (0..3).all(|a| !self.points.spans[a] || (min[a]..max[a]).contains(&s.at[a])));
             spots.into()
         })

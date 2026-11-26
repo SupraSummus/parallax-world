@@ -382,7 +382,7 @@ read where asked, as a plan's columns are made:
 read dithered, a cell's count would hang on the layer asking.
 A root holds a Poisson number of each mark;
 a cell's points go to its children one by one,
-by the chances at their leaves' corners times their leaves still free;
+by their leaves' chances times their leaves still free;
 a leaf's points stand where their mark has a chance.
 So a cell's counts are its children's added, by construction,
 and a far form reading them shows the things that stand.
@@ -397,11 +397,12 @@ no more than it has columns only while a column is no wider than a leaf
 (at level 5, two leaves wide, a tile took four times as long as at level 4).
 From level 5 the forest's canopy is the trees expected,
 whose shadow there falls mostly on their own column.
-A cell costs the chances at its leaves' corners,
-sites of the levels at least as fine as the leaves,
-so leaves should be no wider than the chances vary over.
+A leaf's chances are read at its site,
+where the level whose sites are a leaf apart reads it (`sites::middle`):
+a cell costs columns that level reads too,
+and leaves should be no wider than the chances vary over.
 A cell as wide as the roots (the forest's are 8 m wide)
-costs a column a Poisson draw and those corners,
+costs a column a Poisson draw and those leaves,
 and wider ones their roots', sites the level doesn't read.
 Weighing cells by their chances filtered to their size doesn't avoid it:
 the trees keep to chance only with chances read every 16 m or closer,
@@ -527,7 +528,8 @@ and the path, a finer band, bends to its main street.
 Its height is the mean of the valley floor under it, not one sample of its bumps.
 Sampling is the exception (`Plan::sampled`):
 it is the filter that makes a coarse band of fine ones,
-so a sampled plan may read finer ones (the fields' slope, every 2 m).
+so a sampled plan may read finer ones (the fields' slope, every 2 m),
+each sample read at the middle of its cell, as a site is.
 Layers whose sites are coarser than a plan of categories
 read it dithered ("Plans" in "Levels").
 Plans are built in order from those before them, so they can't form cycles;
