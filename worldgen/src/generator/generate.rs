@@ -139,10 +139,10 @@ fn made(contents: &Contents, b: &Box3, floors: Option<&Floors>) -> VoxelGrid {
  * `medium`, `glow`): as a Fill behind what is there, apart from it; a
  * Paint in front of it, lying on it, and past it only where it covers
  * more; a Carve taking it out, of both. A medium joins the site's medium,
- * the rest its pieces; painted, it lies on the pieces and takes their
- * place, as far as it covers them. What either stops, shows and glows
- * is the sum of
- * what is in it, each by how much of the site's rays it stops there.
+ * the rest its pieces; painted, it lies on the pieces too, in front of
+ * them through each face as far as it covers it (`lie_on_pieces`). What
+ * either stops, shows and glows is the sum of what is in it, each by how
+ * much of the site's rays it stops there.
  * Pieces covering some faces' rays more than others', unlike through
  * some faces, or put where some did, are added face by face (`pieces`,
  * VoxelGrid's `views`); the site as a whole, to what sees no faces (a
@@ -171,20 +171,9 @@ fn see(grid: &mut VoxelGrid, added: &Added, x: i64, y: i64, z: i64) {
         let (stops, shows) = grid.medium.get(i);
         grid.medium.set(i, stops.map(|a| added.rounded(a as u64 * kept)), shows.map(|c| (c as u64 * kept / SHARE as u64) as u16));
     } else if let Some(faster) = added.medium {
-        let mut share = share.min(SHARE);
+        let share = share.min(SHARE);
         if added.op == Op::Paint && grid.pieces.get(i).0 > 0 {
-            // It lies on the pieces, as any paint on what is there, and takes their place: as much of them as it
-            // covers through the face that sees most of it, through every face alike, as a site shows its pieces whole
-            // or not at all. The site's medium is a share of the rays the pieces let through, so the rest of them.
-            let (all, one) = (ALPHA as u64, SHARE as u64);
-            let most = (0..FACE_KINDS).max_by_key(|&k| added.faces.get(k).1).expect("faces");
-            let seen = grid.views.face(i, most).map_or(grid.pieces.get(i).0, |sight| sight.0) as u64;
-            let covered = (share as u64 * all).checked_div(seen).map_or(one, |of| of.min(one));
-            let faces = Faces::all((added.sight, covered as u32));
-            let under = Added { op: Op::Carve, share: covered as u32, faces, medium: None, solid: false, ..*added };
-            pieces(grid, &under, i);
-            let left = all * one - seen * (one - covered);
-            share = (share as u64 * all * one).checked_div(left).map_or(SHARE, |of| of.min(one) as u32);
+            lie_on_pieces(grid, added, faster, i);
         }
         let (stops, shows, glow) = added.joins(grid.medium.get(i), grid.glow.get(i).copied().unwrap_or_default(), faster, share);
         grid.medium.set(i, stops, shows);
@@ -192,6 +181,26 @@ fn see(grid: &mut VoxelGrid, added: &Added, x: i64, y: i64, z: i64) {
         return;
     }
     pieces(grid, added, i);
+}
+
+/**
+ * `see`, of a medium painted on site `i`'s pieces: as any paint on what
+ * is there, it lies on them, so through each face it is in front of
+ * them as much as it covers that face's rays, each channel its own share
+ * (`shares`). What they stop is as it was: the medium stops the rest of
+ * the site's rays as its own (`Added::joins`).
+ */
+fn lie_on_pieces(grid: &mut VoxelGrid, added: &Added, faster: [f64; 3], i: usize) {
+    let one = SHARE as u64;
+    let views = grid.views.get(i).unwrap_or(Faces::all(grid.pieces.get(i)));
+    let shown = views.zip_with(&added.faces, |(alpha, colour), (_, cover)| {
+        let front = shares(cover.min(SHARE), faster);
+        // What the medium shows of the rays the pieces stop, as theirs are, premultiplied by how many they stop.
+        let own = |c: usize| added.sight.0[c] as u64 * alpha as u64 / ALPHA as u64;
+        (alpha, std::array::from_fn(|c| ((colour[c] as u64 * (one - front[c]) + own(c) * front[c]) / one) as u16))
+    });
+    let unlike = shown.each().len() > 1 || grid.glows.get(i).is_some();
+    set_pieces(grid, i, &shown, unlike);
 }
 
 /**
@@ -227,15 +236,22 @@ fn pieces(grid: &mut VoxelGrid, added: &Added, i: usize) {
     let glows = grid.glows.get(i).map_or(Faces::all(glow), |glows| Faces::by(|k| glows[k]));
     let after = views.zip_with(&glows, |s, g| (s, g)).zip_with(&added.faces, |(sight, glow), face| added.to(sight, glow, face));
     let shown = after.map(|(alpha, colour, _)| (alpha, colour));
-    fn most<T: Ord + Copy + Default>(of: impl Iterator<Item = [T; 3]>) -> [T; 3] {
-        of.fold([T::default(); 3], |most, c| std::array::from_fn(|i| most[i].max(c[i])))
-    }
-    grid.pieces.set(i, shown.each().iter().map(|s| s.0).max().expect("a sight"), most(shown.each().iter().map(|s| s.1)));
-    set_glow(grid, i, most(after.each().iter().map(|a| a.2)));
     let unlike = after.each().len() > 1;
+    set_pieces(grid, i, &shown, unlike);
+    set_glow(grid, i, most(after.each().iter().map(|a| a.2)));
     let lit = after.each().iter().any(|a| a.2 != [0; 3]);
-    grid.views.set(i, unlike.then_some(&shown));
     grid.glows.set(i, (unlike && lit).then(|| std::array::from_fn(|k| after.get(k).2)));
+}
+
+/** Sets site `i`'s pieces as `shown` through each face: as a whole, its most; its views, if its faces are `unlike` (in what they glow too). */
+fn set_pieces(grid: &mut VoxelGrid, i: usize, shown: &Faces<crate::grid::Sight>, unlike: bool) {
+    grid.pieces.set(i, shown.each().iter().map(|s| s.0).max().expect("a sight"), most(shown.each().iter().map(|s| s.1)));
+    grid.views.set(i, unlike.then_some(shown));
+}
+
+/** Of colours, or glows, the most of each channel. */
+fn most<T: Ord + Copy + Default>(of: impl Iterator<Item = [T; 3]>) -> [T; 3] {
+    of.fold([T::default(); 3], |most, c| std::array::from_fn(|i| most[i].max(c[i])))
 }
 
 /**

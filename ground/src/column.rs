@@ -216,29 +216,36 @@ mod tests {
     #[test]
     fn a_sea_shows_as_much_from_above_at_every_level() {
         // Dark water under a thin, paler, denser top, on stone: where a coarse site holds two of them,
-        // the top is in front of the water, not in its place nor mixed with it, and the water in front of the floor.
+        // the top is in front of the water, not in its place nor mixed with it, and the water in front of the floor,
+        // deep or shallow, where a site holds all of it and the floor.
         let kinds = vec![kind(&"#808080", false), kind(&"#2478a0", true), kind(&"#9cc4d6", true)];
-        let sea = |_, _| Column::new(0).surface(0, 1).medium(1, 38, 0.8 / 38.0).medium(2, 2, 0.4 / 2.0);
-        let world = Generator { kinds, seed: 1, layers: vec![Layer::Field(crate::columns("sea", 0.0, Op::Paint, sea))] };
-        let shown = |level: u32| {
-            let s = (1i64 << level) as f64;
-            let grid = generate(&world, &Box3 { min: [0, -6, 0], max: [64, (40 >> level) + 6, 64] }, level);
-            let mut sum = [0.0; 3];
-            for i in 0..4096 {
-                let at = |n: u64| 8.0 + 48.0 * worldgen::noise::hash(n, i, 0, 0) as f64 / u32::MAX as f64;
-                for (_, seen) in composited(&grid, [at(1), 40.0 / s + 5.0, at(2)], [0.0, -1.0, 0.0], 40.0 / s + 10.0) {
-                    (0..3).for_each(|c| sum[c] += seen.shown[c] / 4096.0);
+        for deep in [38, 6] {
+            let sea = move |_, _| Column::new(0).surface(0, 1).medium(1, deep, 0.8 / 38.0).medium(2, 2, 0.4 / 2.0);
+            let world = Generator { kinds: kinds.clone(), seed: 1, layers: vec![Layer::Field(crate::columns("sea", 0.0, Op::Paint, sea))] };
+            let top = (deep + 2) as f64;
+            let shown = |level: u32| {
+                let s = (1i64 << level) as f64;
+                let grid = generate(&world, &Box3 { min: [0, -6, 0], max: [64, ((deep + 2) >> level) + 6, 64] }, level);
+                let mut sum = [0.0; 3];
+                for i in 0..4096 {
+                    let at = |n: u64| 8.0 + 48.0 * worldgen::noise::hash(n, i, 0, 0) as f64 / u32::MAX as f64;
+                    for (_, seen) in composited(&grid, [at(1), top / s + 5.0, at(2)], [0.0, -1.0, 0.0], top / s + 10.0) {
+                        (0..3).for_each(|c| sum[c] += seen.shown[c] / 4096.0);
+                    }
                 }
-            }
-            sum
-        };
-        let fine = shown(0);
-        // Not past level 5, where a voxel holds all of the sea. Not nearer than this: a site's share of the water
-        // stops red for all its rays, those that meet the top in the site beside it too (0.027 of red at level 4).
-        for level in 1..6 {
-            let coarse = shown(level);
-            for c in 0..3 {
-                assert!((coarse[c] - fine[c]).abs() < 0.035, "level {level}: rays down see {coarse:.3?}, at level 0 {fine:.3?}");
+                sum
+            };
+            let fine = shown(0);
+            // A site's share of the water stops red for all its rays, those that meet the top in the site beside it
+            // too (0.027 of red at level 4).
+            for level in 1..7 {
+                let coarse = shown(level);
+                for c in 0..3 {
+                    assert!(
+                        (coarse[c] - fine[c]).abs() < 0.035,
+                        "{deep} deep, level {level}: rays down see {coarse:.3?}, at level 0 {fine:.3?}"
+                    );
+                }
             }
         }
     }

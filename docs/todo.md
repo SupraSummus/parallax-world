@@ -226,8 +226,6 @@ Numbers are for the forest at 1280×800, as measured when written.
 - **Levels past a world's `levels` are not checked.**
   The valley's, the learned town's and the city's stop at 3 or 4,
   where their things break; their fields go on to 6.
-  So the valley's sea, where far sites are taller than the water is deep,
-  may show its floor dry at level 6 unseen.
   A world could name levels for its fields apart from its things'.
   Not long rays across a wide region, against level 0:
   grazing along a ground, they cross its coarse half-full sites many times over,

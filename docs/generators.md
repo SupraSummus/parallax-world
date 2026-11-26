@@ -699,9 +699,13 @@ So among a site's media none hides another:
 each stops its share of what the others let through,
 behind them, or, painted, in front (`Added::joins`),
 and the sea's pale top stays pale over its dark water.
-Painted, a medium lies on the site's pieces as any paint does,
-and takes their place as far as it covers them:
-so the sea hides its floor where both are in one coarse site.
+Painted, a medium lies on the site's pieces as any paint does:
+through each face, in front of them as much as it covers that face's rays,
+each channel its own share (`lie_on_pieces`),
+and it stops the rest of the site's rays as its own.
+So a coarse site of the sea's floor shows, from above, the water on it,
+however little of the site the water fills,
+and the sea looks as deep at every level (`a_sea_shows_as_much_from_above_at_every_level`).
 A site is still one look, whatever lies where in it:
 its share of the water stops red for every ray through it,
 those that meet the sea's top in the site beside it too.
