@@ -12,10 +12,12 @@
 // pack_draws), so that where depths tie, the same shows every time.
 // cull_rest also counts the pictures of medium in front of them by their
 // place along the rays, which scan_veils and order_veils list far to
-// near, to be laid one over another (veil_fragment) and over the picture.
+// near, to be laid one over another on the picture (veil_fragment).
 
-// A face's own rays, for pictures drawn flat and of medium (flat_vertex, veil_vertex).
+// A face's own rays, for pictures drawn flat and of medium (flat_vertex, veil_vertex);
+// what a picture of medium lets through of each channel (veil_fragment).
 enable clip_distances;
+enable dual_source_blending;
 
 struct FaceView {
   // Columns: the camera's right, up and forward axes, in the face's coordinates.
@@ -148,8 +150,8 @@ struct DrawArgs {
 @group(0) @binding(24) var<storage, read_write> listed: array<DrawArgs>;
 @group(0) @binding(25) var<storage, read_write> blocks: array<u32>;
 @group(0) @binding(8) var farthest: texture_2d<f32>;
-// The pictures of medium to draw, far to near, and how many; in two
-// halves, how many at each place (veil_place), then where in veil_draws
+// The halves of pictures of medium to draw, far to near, and how many; in two
+// parts, how many at each place (veil_place), then where in veil_draws
 // the next of each goes.
 @group(0) @binding(9) var<storage, read_write> veils_drawn: atomic<u32>;
 @group(0) @binding(16) var<storage, read_write> veil_draws: array<DrawArgs>;
@@ -173,7 +175,7 @@ struct DrawArgs {
 @group(0) @binding(12) var level_out: texture_storage_2d<r32float, write>;
 // Showing the frame.
 @group(0) @binding(13) var picture: texture_2d<f32>;
-// The pictures of medium laid one over another (veil_fragment).
+// The picture, finer than its own format, with the pictures of medium laid on it (veil_fragment).
 @group(0) @binding(14) var veil: texture_2d<f32>;
 
 fn ray_of(view: mat3x3f, position: vec4f) -> vec3f {
@@ -284,7 +286,7 @@ fn flat_fragment(in: RunPixel) -> @location(0) vec4f {
   return vec4f(shade(chunks[in.colours.z], unpack4x8unorm(colour)), 1.0);
 }
 
-// A picture of medium (compositor.rs's veils), a quad on its slab's middle
+// A half of a picture of medium (compositor.rs's veils), a quad on its slab's middle
 // plane, as wide as its cluster's box but for the slants the face's rays
 // do not reach where its chunk is. Its depth is the least anything past
 // its slab's front may be drawn at (nearest_depth, as its culling has it),
@@ -292,9 +294,9 @@ fn flat_fragment(in: RunPixel) -> @location(0) vec4f {
 // ray crosses of it lies before whatever the ray meets in the slab, so
 // medium behind that is not drawn, and it shows before all within. Where on
 // the picture, in bricks across and rows up from its first place's
-// centre; where its picture is; which halves of its slab its
-// level draws (veil_fragment); how far aside a ray of slant 1 takes its
-// columns there; where it is from the eye; and how its chunk shades
+// centre; where its picture is; which half of its slab it is
+// (veil_fragment); how far aside a ray of slant 1 takes its
+// columns there, toward the half; where it is from the eye; and how its chunk shades
 // (Shading), worked out here: reading the globals for it in every
 // fragment is slow.
 struct Veil {
@@ -302,7 +304,7 @@ struct Veil {
   @builtin(clip_distances) owned: array<f32, 6>,
   @location(0) place: vec2f,
   @location(1) @interpolate(flat) picture: u32,
-  @location(2) @interpolate(flat) drawn: vec2f,
+  @location(2) @interpolate(flat) half: u32,
   @location(3) at: vec3f,
   @location(4) @interpolate(flat) grey: vec4f,
   @location(5) @interpolate(flat) weight: vec3f,
@@ -313,7 +315,7 @@ struct Veil {
 struct VeilPixel {
   @location(0) place: vec2f,
   @location(1) @interpolate(flat) picture: u32,
-  @location(2) @interpolate(flat) drawn: vec2f,
+  @location(2) @interpolate(flat) half: u32,
   @location(3) at: vec3f,
   @location(4) @interpolate(flat) grey: vec4f,
   @location(5) @interpolate(flat) weight: vec3f,
@@ -323,11 +325,10 @@ struct VeilPixel {
 
 @vertex
 fn veil_vertex(@builtin(vertex_index) vertex: u32) -> Veil {
-  let t = tiles[vertex >> 2u];
+  let t = tiles[vertex >> 3u];
+  let half = (vertex >> 2u) & 1u;
   let slot = t.slot_count >> 8u;
   let c = chunks[slot];
-  let first = t.layer + vec2f(0.0, t.half);
-  let drawn = select(vec2f(0.0), vec2f(1.0), first > vec2f(c.clip) & first <= vec2f(c.reach));
   // Its box holds the face's rays' slants: this chunk's, from its slab's front, at most.
   let front = c.distance + t.near;
   let far = max(abs(c.origin + t.min), abs(c.origin + t.max));
@@ -342,10 +343,10 @@ fn veil_vertex(@builtin(vertex_index) vertex: u32) -> Veil {
   out.owned = in_face(c.face, at);
   out.place = (corner - t.base) / brick_of(c);
   out.picture = t.first;
-  out.drawn = drawn;
-  // Half the slab's depth, in bricks across and up.
+  out.half = half;
+  // Half the slab's depth, in bricks across and up, nearer it toward the eye, farther away.
   let layer = globals.faces[c.face].axis.w;
-  out.aside = t.half * vec2f(0.5, layer / 2.0);
+  out.aside = select(-1.0, 1.0, half == 1u) * t.half * vec2f(0.5, layer / 2.0);
   out.at = at;
   let shading = shading_of(c);
   out.grey = shading.grey;
@@ -355,40 +356,58 @@ fn veil_vertex(@builtin(vertex_index) vertex: u32) -> Veil {
   return out;
 }
 
-// A column of the picture of medium at `picture`, row q, column s: its
-// colour times its optical depth, and that depth, of the halves of its
-// slab `halves` weighs; none outside the picture.
-fn medium_at(picture: u32, q: i32, s: i32, halves: vec2f) -> vec4f {
+// Optical depths of each channel from a word (compositor.rs's depth_bits).
+fn depths(w: u32) -> vec3f {
+  let q = vec3u(w, w >> 10u, w >> 20u) & vec3u(1023u);
+  return select(exp2(vec3f(q) / DEPTH_STEPS - DEPTH_LEAST), vec3f(0.0), q == vec3u(0u));
+}
+const DEPTH_STEPS = 48.0;
+const DEPTH_LEAST = 14.0;
+
+// A half of a slab of a column of the picture of medium at `picture`, row
+// q, column s (bake's Half): of each channel, its colour times its optical
+// depth, and that depth; none outside the picture.
+fn medium_at(picture: u32, q: i32, s: i32, half: u32) -> mat2x3f {
   let size = vec2i(columns[picture]);
   if q < 0 || s < 0 || q >= size.y || s >= size.x {
-    return vec4f(0.0);
+    return mat2x3f();
   }
-  let column = columns[picture + 1u + u32(q * size.x + s)];
-  let depth = dot(unpack2x16float(column.y), halves);
-  return vec4f(unpack4x8unorm(column.x).rgb * depth, depth);
+  let column = columns[picture + 1u + 2u * u32(q * size.x + s) + half];
+  let depth = depths(column.y);
+  return mat2x3f(unpack4x8unorm(column.x).rgb * depth, depth);
 }
 
 // A row of a picture of medium at x, in bricks: between the two columns
 // around x, each as much as x is near it.
-fn medium_row(picture: u32, q: i32, x: f32, halves: vec2f) -> vec4f {
+fn medium_row(picture: u32, q: i32, x: f32, half: u32) -> mat2x3f {
   let s = i32(floor(x));
-  return mix(medium_at(picture, q, s, halves), medium_at(picture, q, s + 1, halves), x - f32(s));
+  let t = x - f32(s);
+  return medium_at(picture, q, s, half) * (1.0 - t) + medium_at(picture, q, s + 1, half) * t;
 }
 
 // A picture of medium at `place`: its columns' as a field, each column's
 // share of it a tent over twice its brick, so that they add up to one
 // everywhere: across cells too, whose pictures, each its own columns'
 // alone, lie over one another there.
-fn medium_field(picture: u32, place: vec2f, halves: vec2f) -> vec4f {
+fn medium_field(picture: u32, place: vec2f, half: u32) -> mat2x3f {
   let q = i32(floor(place.y));
-  return mix(medium_row(picture, q, place.x, halves), medium_row(picture, q + 1, place.x, halves), place.y - f32(q));
+  let t = place.y - f32(q);
+  return medium_row(picture, q, place.x, half) * (1.0 - t) + medium_row(picture, q + 1, place.x, half) * t;
 }
 
 // Columns of a picture of medium a pixel takes along its ray through each
 // half of a slab, at most.
 const TAPS = 8;
 
-// The medium of a slab along a pixel's ray. A column's is taken as spread
+// What a picture of medium sends of each channel, and lets through of
+// what is behind it: the picture under them takes the one and that times
+// the other (Pipelines's veil).
+struct Veiled {
+  @location(0) @blend_src(0) sent: vec4f,
+  @location(0) @blend_src(1) through: vec4f,
+}
+
+// The medium of a half of a slab along a pixel's ray. A column's is taken as spread
 // evenly through each half of its slab, as a pillar is solid
 // through its depth: a ray slanting σ off the axis crosses the columns
 // over σ times the half's depth, the nearer half's before where it
@@ -396,35 +415,39 @@ const TAPS = 8;
 // each as much as it crosses, so a pixel takes the columns along that
 // line, one a column but TAPS at most: a deeper slab's, more apart. So
 // medium thin along the axis shows as much as the rays cross of it, not
-// only where they cross the plane.
+// only where they cross the plane. A half is drawn if its level's (veil_place).
 // A column's voxels are k layers apart, and its brick its share of the
 // plane, so a ray along the axis crosses as much of each as k layers'
 // depth, a slanted one as much more as its path through the slab is
-// longer; a voxel's optical depth is of a path of one site (lattice's `over`). Its colour shows as much as it stops, over what is behind:
-// the pictures come far to near (order_veils), and each is fogged by its
-// distance, as whole voxels are. Of a
+// longer; a voxel's optical depth is of a path of one site (lattice's `over`).
+// Each channel apart, as the voxels engine's rays take a medium: its colour
+// shows as much as it stops of it, over what is behind, which it lets the
+// rest of through; the halves come far to near (order_veils), every
+// picture's farther half of a slab before any's nearer, and each
+// is fogged by its distance, as whole voxels are. Of a
 // slab's halves, those past its level's `clip`, where the next finer
 // level's medium ends, and not past its `reach`, where its own does
 // (place): each level's medium lies between two planes, which fall
 // between halves (bake's slab_layers).
 @fragment
-fn veil_fragment(in: VeilPixel) -> @location(0) vec4f {
+fn veil_fragment(in: VeilPixel) -> Veiled {
   let aside = in.at.xy / in.at.z * in.aside;
   let taps = clamp(i32(ceil(max(abs(aside.x), abs(aside.y)))), 1, TAPS);
-  var field = vec4f(0.0);
+  var field = mat2x3f();
   for (var k = 0; k < taps; k++) {
-    let by = aside * (f32(k) + 0.5) / f32(taps);
-    if in.drawn.x != 0.0 {
-      field += medium_field(in.picture, in.place - by, vec2f(1.0, 0.0));
-    }
-    if in.drawn.y != 0.0 {
-      field += medium_field(in.picture, in.place + by, vec2f(0.0, 1.0));
-    }
+    field += medium_field(in.picture, in.place + aside * (f32(k) + 0.5) / f32(taps), in.half);
   }
-  field /= f32(taps);
-  let along = in.along * length(in.at) / in.at.z;
-  let stops = 1.0 - exp(-field.a * along);
-  return vec4f(shaded(Shading(in.grey, in.weight), field) * (stops / max(field.a, 1e-30)), stops);
+  let along = in.along * length(in.at) / in.at.z / f32(taps);
+  let veil = veiled(field, along, Shading(in.grey, in.weight));
+  return Veiled(vec4f(veil[0], 0.0), vec4f(veil[1], 1.0));
+}
+
+// What a half of a slab sends of each channel along `along` times its
+// optical depth, its colour shaded, and what it lets through.
+fn veiled(field: mat2x3f, along: f32, shading: Shading) -> mat2x3f {
+  let through = exp(-field[1] * along);
+  let colour = shaded(shading, vec4f(field[0] / max(field[1], vec3f(1e-30)), 1.0));
+  return mat2x3f(colour * (1.0 - through), through);
 }
 
 // Its colour as the chunk paints it (Chunk's tint) and fogged.
@@ -480,12 +503,10 @@ fn face_of(ray: vec3f) -> vec3f {
   return f;
 }
 
-// Over the picture: the medium's pictures, one over another, and the
-// picture as much as they let through.
+// The picture, the medium's pictures laid on it (veil_fragment).
 @fragment
 fn composite_fragment(in: Sky) -> @location(0) vec4f {
-  let veils = textureLoad(veil, vec2i(in.position.xy), 0);
-  return vec4f(veils.rgb, 1.0 - veils.a);
+  return textureLoad(veil, vec2i(in.position.xy), 0);
 }
 
 // |v| for the v in [lo, hi] nearest to 0.
@@ -646,7 +667,7 @@ fn draws_cluster(at: u32, cluster: Cluster, phase: u32) -> bool {
 // Whole voxels' (runs of a picture), its draw: chunks were uploaded near
 // to far, at first, so that nearer voxels are mostly drawn first and hide
 // what is behind them early. A picture of
-// medium's, none, but in the second phase counted in its place
+// medium's, none, but in the second phase each half counted in its place
 // (veil_place), for order_veils to list. None: no vertices.
 fn cull(at: u32, phase: u32) -> DrawArgs {
   var draw = DrawArgs(0u, 0u, 0u, 0u);
@@ -657,9 +678,11 @@ fn cull(at: u32, phase: u32) -> DrawArgs {
   let c = chunks[cluster.slot_count >> 8u];
   if at >= c.whole.y && at < c.veils {
     if phase == 1u {
-      let place = veil_place(cluster, c);
-      if place >= 0 {
-        atomicAdd(&veil_places[place], 1u);
+      for (var half = 0u; half < 2u; half++) {
+        let place = veil_place(cluster, c, half);
+        if place >= 0 {
+          atomicAdd(&veil_places[place], 1u);
+        }
       }
     }
   } else if at >= c.whole.x && at < c.whole.y && draws_cluster(at, cluster, phase) {
@@ -742,18 +765,17 @@ fn pack_draws(@builtin(workgroup_id) id: vec3u, @builtin(num_workgroups) n: vec3
   }
 }
 
-// Which of the half slabs a ray of its face crosses a picture of medium's
-// cluster draws (its nearer, if both), numbered from the near plane: the
+// Where among the half slabs a ray of its face crosses a picture of
+// medium's cluster draws its `half`, numbered from the near plane: the
 // finer levels' first, as many as fit between their planes (place), and
 // two more, as the finest's nearer one is rounded to its grid; then its
 // own level's, from its `clip`, each 2^(L − 1) layers of grid 0 deep (bake's
 // slab_layers). -1 if the frame does not draw it: hidden behind what the
-// first phase drew, or neither half its level's (veil_fragment).
-fn veil_place(cluster: Cluster, c: Chunk) -> i32 {
-  let halves = cluster.layer + vec2f(0.0, cluster.half);
-  let drawn = halves > vec2f(c.clip) & halves <= vec2f(c.reach);
+// first phase drew, or not its level's.
+fn veil_place(cluster: Cluster, c: Chunk, half: u32) -> i32 {
+  let first = cluster.layer + f32(half) * cluster.half;
   let b = screen_box(cluster);
-  if !any(drawn) || !shows(b) || (culls && hidden(b, nearest_depth(cluster, level_ahead(c.face, c.distance + cluster.near)))) {
+  if first <= c.clip || first > c.reach || !shows(b) || (culls && hidden(b, nearest_depth(cluster, level_ahead(c.face, c.distance + cluster.near)))) {
     return -1;
   }
   let eye = i32(floor(globals.faces[c.face].eye.z / globals.faces[c.face].axis.w));
@@ -761,7 +783,7 @@ fn veil_place(cluster: Cluster, c: Chunk) -> i32 {
   for (var l = globals.medium.w; l < i32(c.level); l++) {
     place += ((reach_of(globals.medium, l, eye) - medium_from(l, eye)) >> u32(l - 1)) + 2;
   }
-  return place + i32(ceil((select(halves.y, halves.x, drawn.x) - c.clip) / cluster.half)) - 1;
+  return place + i32(ceil((first - c.clip) / cluster.half)) - 1;
 }
 
 // Where in veil_draws the pictures at each place go, far ones first, as
@@ -777,7 +799,7 @@ fn scan_veils() {
   atomicStore(&veils_drawn, at);
 }
 
-// Lists the pictures of medium cull_rest counted where scan_veils says.
+// Lists the halves of pictures of medium cull_rest counted where scan_veils says.
 @compute @workgroup_size(64)
 fn order_veils(@builtin(workgroup_id) id: vec3u, @builtin(num_workgroups) n: vec3u, @builtin(local_invocation_index) thread: u32) {
   let at = thread_of(id, n, thread);
@@ -789,12 +811,13 @@ fn order_veils(@builtin(workgroup_id) id: vec3u, @builtin(num_workgroups) n: vec
   if at < c.whole.y || at >= c.veils {
     return;
   }
-  let place = veil_place(cluster, c);
-  if place < 0 {
-    return;
-  }
   let places = i32(arrayLength(&veil_places) / 2u);
-  veil_draws[atomicAdd(&veil_places[places + place], 1u)] = DrawArgs(4u, cluster.slot_count & 0xffu, at * 4u, 0u);
+  for (var half = 0u; half < 2u; half++) {
+    let place = veil_place(cluster, c, half);
+    if place >= 0 {
+      veil_draws[atomicAdd(&veil_places[places + place], 1u)] = DrawArgs(4u, cluster.slot_count & 0xffu, (2u * at + half) * 4u, 0u);
+    }
+  }
 }
 
 // The thread's place among those of its dispatch (compositor.rs's groups).
