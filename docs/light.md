@@ -64,7 +64,7 @@ till two changes, which cost no time:
   through both on average, the roof leaked as the walls had;
 - taking over, a coarser site beside the line's is read
   only as far as the finer site towards it lets light through
-  (`towards` in `coarser`), so not past a wall:
+  (`through` in `coarser`), so not past a wall:
   that let a tenth of the sky into the shed's middle.
 
 Not looked at: walls slanted to the lattice, and their corners,
@@ -191,20 +191,36 @@ and two finding the same at once do no harm.
 Each site is kept under a lock of its own (`Lit` in `light/`):
 under one lock a column of tiles, and found by a map,
 the threads waited for each other, and the first view took a quarter more work.
+Their room is made a cube of 4 sites a side at a time (`CUBE`):
+light begins few sites of most bricks it reads,
+and of a brick's 512 a forest's first view began under a quarter.
 Each Light holds the tiles it read (`Level`), asking the others for each once.
 They keep the light of the tiles read lately (`KEPT_SITES`, `Shared::begun`):
 fewer hold less, and under what a view reads at once, lighting slows by half.
+Forgetting nothing, one thread lit a forest's first view in a third less time,
+holding twice as much: so each byte a site keeps costs time too.
 Forgotten brick by brick, not tile by tile,
 a flight held a tenth less and owed twice the bricks.
-Most of what a site kept takes is its rounds,
-kept only of sites that stop light (no site reads another's).
-They, and what they are found from (`Paths`),
+What a site keeps is, most first:
+the sites met that reflect, twenty or so, 8 bytes each (`Reflects`);
+what comes to it (`Paths`);
+its rounds, kept only of sites that stop light (no site reads another's);
+and its settled light, of half the sites.
+Rounds and what they are found from
 are in 16 bits a channel (`Packed`): half of what floats took,
 a hundredth of a view's pixels one step of colour off.
 A site's settled light is not, read far more often than found:
 packed, it cost more time than the rest for a third of what they saved.
 Room for each round alone, not a vector's to spare,
-held a twentieth less for a tenth more work.
+held a twentieth less for a tenth more work, a fifth in a forest.
+
+Most of lighting's own time is reading:
+the world's sites the lines meet,
+and the rounds of the sites met that reflect, each a few cache lines away.
+Tried, and no faster:
+the sites lines met last kept by where (a quarter to a third met again);
+of a site's settled light, only the direction taking over wants read;
+a grid's alpha and colour of a site kept together.
 
 Native's light sliders light the world anew (`World::relight`),
 as slowly as at the start.

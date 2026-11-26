@@ -55,7 +55,7 @@ use lattice::ray::FACES;
 use lattice::{FACE_KINDS, GRID_LEVELS, Look};
 
 use worldgen::World;
-use worldgen::grid::{ALPHA, BRICK, COLOUR_ONE, GLOW_ONE, Grid, VoxelGrid};
+use worldgen::grid::{ALPHA, COLOUR_ONE, GLOW_ONE, Grid, Stops, VoxelGrid};
 use worldgen::picture::Picture;
 use worldgen::tiles::{TILE, made_with, make_sites, parted};
 
@@ -117,17 +117,27 @@ const HALVES: [Option<[usize; 2]>; N] = {
 
 /**
  * Per direction, the faces a line along it comes into a site by, one per
- * axis it goes along (FACES' kinds): along an axis, the one twice, as a
- * site beside an edge is come into (`along`).
+ * axis it goes along (FACES' kinds): along an axis one, as into a site
+ * beside an edge (`along`), across an edge two.
  */
-const ENTERS: [[usize; 2]; N] = {
-    let mut enters = [[0; 2]; N];
+static ENTERS: [&[usize]; N] = {
+    // Each direction's faces, its one first along an axis, so that a slice of them can be handed out.
+    static FACES_IN: [[usize; 2]; N] = {
+        let mut faces = [[0; 2]; N];
+        let mut d = 0;
+        while d < N {
+            faces[d] = match HALVES[d] {
+                Some([a, b]) => [lattice::opposite(a), lattice::opposite(b)],
+                None => [lattice::opposite(d); 2],
+            };
+            d += 1;
+        }
+        faces
+    };
+    let mut enters: [&[usize]; N] = [&[]; N];
     let mut d = 0;
     while d < N {
-        enters[d] = match HALVES[d] {
-            Some([a, b]) => [lattice::opposite(a), lattice::opposite(b)],
-            None => [lattice::opposite(d); 2],
-        };
+        enters[d] = if HALVES[d].is_some() { &FACES_IN[d] } else { FACES_IN[d].split_at(1).0 };
         d += 1;
     }
     enters
@@ -169,23 +179,28 @@ struct Made {
 }
 
 /**
- * What the Lights found in a tile: by brick (z-major, then y, then x) and
+ * What the Lights found in a tile: by cube (z-major, then y, then x) and
  * site in it, each site under a lock of its own, nothing till begun; and
  * whether a Light read it since the tiles not read were last forgotten
  * (Shared::begun).
  */
 struct Lit {
     read: AtomicBool,
-    bricks: [OnceLock<Box<Sites>>; TILE_BRICKS],
+    cubes: [OnceLock<Box<Sites>>; TILE_CUBES],
 }
 
-type Sites = [Mutex<Option<Box<Site>>>; BRICK_SITES];
+type Sites = [Mutex<Option<Box<Site>>>; CUBE_SITES];
 
-/** Bricks a tile is a side, and in all. */
-const SIDE: i64 = TILE / BRICK;
-const TILE_BRICKS: usize = (SIDE * SIDE * SIDE) as usize;
-/** Sites a brick holds: its BRICK³ points. */
-const BRICK_SITES: usize = (BRICK * BRICK * BRICK) as usize;
+/**
+ * Sites a cube of a Lit is a side: smaller than a brick, as light begins
+ * few sites of most of the bricks it reads, and a site's room is kept for
+ * all its cube's (docs/light.md).
+ */
+const CUBE: i64 = 4;
+/** Cubes a tile is a side, and in all; sites a cube holds. */
+const SIDE: i64 = TILE / CUBE;
+const TILE_CUBES: usize = (SIDE * SIDE * SIDE) as usize;
+const CUBE_SITES: usize = (CUBE * CUBE * CUBE) as usize;
 
 impl Made {
     /** The same tiles and sites, of what was found only the tiles' `keep` says to. */
@@ -198,15 +213,15 @@ impl Made {
     fn site(&self, site: [i64; 3]) -> &Mutex<Option<Box<Site>>> {
         let tile = (site[1].div_euclid(TILE) - self.tiles[0][1]) as usize;
         let lit =
-            self.lit[tile].get_or_init(|| Arc::new(Lit { read: AtomicBool::new(false), bricks: std::array::from_fn(|_| OnceLock::new()) }));
+            self.lit[tile].get_or_init(|| Arc::new(Lit { read: AtomicBool::new(false), cubes: std::array::from_fn(|_| OnceLock::new()) }));
         // Written only when it changes: Lights reading the same tile do not take the mark from each other.
         if !lit.read.load(Ordering::Relaxed) {
             lit.read.store(true, Ordering::Relaxed);
         }
-        let [x, y, z] = site.map(|v| v.rem_euclid(TILE) / BRICK);
-        let brick = lit.bricks[((z * SIDE + y) * SIDE + x) as usize].get_or_init(|| Box::new(std::array::from_fn(|_| Mutex::default())));
-        let [x, y, z] = site.map(|v| v.rem_euclid(BRICK));
-        &brick[((z * BRICK + y) * BRICK + x) as usize]
+        let [x, y, z] = site.map(|v| v.rem_euclid(TILE) / CUBE);
+        let cube = lit.cubes[((z * SIDE + y) * SIDE + x) as usize].get_or_init(|| Box::new(std::array::from_fn(|_| Mutex::default())));
+        let [x, y, z] = site.map(|v| v.rem_euclid(CUBE));
+        &cube[((z * CUBE + y) * CUBE + x) as usize]
     }
 }
 
@@ -477,15 +492,40 @@ struct Paths {
 }
 
 /**
- * A site met that reflects (Paths): the direction, the steps along it,
- * which site of the last step (0 the one past it, 1 or 2 one beside its
- * edge, HALVES), the face seen (`meets`), and the share of the light on
- * it that comes.
+ * A site met that reflects (Paths): in 16 bits, the direction, the steps
+ * along it (MOST_STEPS at most), which site of the last step (0 the one
+ * past it, 1 or 2 one beside its edge, HALVES) and the face seen
+ * (`meets`); and the share of the light on it that comes. Most of what
+ * a site keeps, so as small as it goes.
  */
-type Reflects = (u8, u8, u8, u8, Packed);
+#[derive(Clone, Copy)]
+struct Reflects {
+    at: u16,
+    share: Packed,
+}
 
-/** Per direction, the colour of the whole voxel a whole voxel touches that way, none (black) if it touches none; None if it touches none at all, as most sites. */
-type Touches = Option<Box<[Rgb; N]>>;
+impl Reflects {
+    fn new(d: usize, step: usize, part: usize, face: usize, share: Packed) -> Reflects {
+        debug_assert!(d < N && (1..=MOST_STEPS).contains(&step) && part < 3 && face < F);
+        Reflects { at: (d | (step - 1) << 5 | part << 11 | face << 13) as u16, share }
+    }
+
+    /** The site it is, met from `p`; its direction, and the face seen. */
+    fn site(self, p: [i64; 3]) -> ([i64; 3], usize, usize) {
+        let at = self.at as usize;
+        let (d, step, part, face) = (at & 31, (at >> 5 & 63) as i64, at >> 11 & 3, at >> 13);
+        // Past the steps before the last, the one past it, or the one beside its edge (HALVES) by `part`.
+        let before = add(p, DIRECTIONS[d].map(|v| v * step));
+        let last = match HALVES[d] {
+            Some(faces) if part > 0 => FACES[faces[part - 1]],
+            _ => DIRECTIONS[d],
+        };
+        (add(before, last), d, face)
+    }
+}
+
+/** Per face, the colour of the whole voxel a whole voxel touches across it, none (black) if it touches none; None if it touches none at all, as most sites. */
+type Touches = Option<Box<[Rgb; F]>>;
 
 pub struct Light {
     world: Arc<World>,
@@ -549,36 +589,36 @@ impl Light {
     }
 
     /**
-     * How light sees `site` of level `i` from direction `from`: how much of
-     * each channel it stops (of ALPHA), its pieces and its medium of the
-     * rest, and their colour; what it glows.
+     * How light sees `site` of level `i` through face `from`: how much of
+     * each channel it stops, its pieces and its medium of the rest, and
+     * their colour; what it glows.
      */
-    fn see(&mut self, i: usize, site: [i64; 3], from: usize) -> (([u32; 3], Rgb), Rgb) {
-        let glowing = self.glow;
-        let Some(([x, y, z], grid)) = self.hold(i, site) else { return (([0; 3], [0.0; 3]), [0.0; 3]) };
-        let ((pieces, p), (medium, m), glow) = grid.light(x, y, z, from);
-        // What they show comes premultiplied, of COLOUR_ONE: as a share of the light on what it stops.
-        let stops = medium.map(|m| pieces as u32 + m as u32);
-        let colour = std::array::from_fn(|c| {
-            let (alpha, shows) = (stops[c] as f32 / ALPHA as f32, (p[c] + m[c]) as f32 / COLOUR_ONE as f32);
-            if alpha > 0.0 { (shows / alpha).min(1.0) } else { 0.0 }
-        });
-        ((stops, colour), glow.map(|g| g as f32 * glowing))
+    fn see(&mut self, i: usize, site: [i64; 3], from: usize) -> ((Rgb, Rgb), Rgb) {
+        let (_, stops, glow) = self.meets(i, site, &[from]);
+        (stops, glow)
     }
 
     /**
      * What a line coming into `site` of level `i` by the faces `enters`
-     * (ENTERS) meets: the face it is seen through, of the two the one that
-     * stops more, and through it what it stops, its colour and its glow.
+     * (ENTERS) meets: the face it is seen through, the first of those that
+     * stop most, and through it what it stops, its colour and its glow.
      * A line across an edge crosses a wall in one of the sites it meets
      * there, so each stops it as the wall stops a line straight through
      * it (docs/light.md, "Thin walls").
      */
-    fn meets(&mut self, i: usize, site: [i64; 3], enters: [usize; 2]) -> (usize, (Rgb, Rgb), Rgb) {
-        let [a, b] = enters.map(|face| (face, self.see(i, site, face)));
-        let stops = |(_, ((stops, _), _)): &(usize, (([u32; 3], Rgb), Rgb))| stops.iter().sum::<u32>();
-        let (face, ((stops, colour), glow)) = if stops(&b) > stops(&a) { b } else { a };
-        (face, (stops.map(|k| k as f32 / ALPHA as f32), colour), glow)
+    fn meets(&mut self, i: usize, site: [i64; 3], enters: &[usize]) -> (usize, (Rgb, Rgb), Rgb) {
+        let glowing = self.glow;
+        let Some(([x, y, z], grid)) = self.hold(i, site) else { return (enters[0], ([0.0; 3], [0.0; 3]), [0.0; 3]) };
+        let stops = |((pieces, _), (medium, _), _): &Seen| medium.iter().map(|&m| *pieces as u32 + m as u32).sum::<u32>();
+        let mut most = (enters[0], grid.light(x, y, z, enters[0]));
+        for &face in &enters[1..] {
+            let next = grid.light(x, y, z, face);
+            if stops(&next) > stops(&most.1) {
+                most = (face, next);
+            }
+        }
+        let (stops, glow) = seen(most.1, glowing);
+        (most.0, stops, glow)
     }
 
     /** How much of what comes through `site` of level `i` it lets through. */
@@ -649,14 +689,14 @@ impl Light {
     fn coming(&mut self, i: usize, p: [i64; 3], n: usize, paths: &Paths) -> [Rgb; N] {
         let mut light = paths.comes.map(unpack);
         if n > 0 {
-            for &(d, step, part, back, reflects) in &paths.reflects {
-                let (q, back) = (met(p, d as usize, step as i64, part as usize), back as usize);
+            for &reflects in &paths.reflects {
+                let (q, d, back) = reflects.site(p);
                 let on = match self.site(i, q, |site| site.rounds.get(n - 1).map(|on| on[back])) {
                     Some(on) => unpack(on),
                     None => self.round(i, q, n - 1)[back],
                 };
-                let reflects = unpack(reflects);
-                (0..3).for_each(|c| light[d as usize][c] += reflects[c] * on[c]);
+                let share = unpack(reflects.share);
+                (0..3).for_each(|c| light[d][c] += share[c] * on[c]);
             }
         }
         light
@@ -698,10 +738,10 @@ impl Light {
             let q = add(p, DIRECTIONS[d]);
             // Across a face, a whole voxel touches the next; across an edge, light comes between them.
             if whole && HALVES[d].is_none() && self.whole(i, q) {
-                touches.get_or_insert_with(|| Box::new([[0.0; 3]; N]))[d] = self.see(i, q, ENTERS[d][0]).0.1;
+                touches.get_or_insert_with(|| Box::new([[0.0; 3]; F]))[d] = self.meets(i, q, ENTERS[d]).1.1;
                 return [0; 3];
             }
-            pack(self.along(i, p, d, &mut reflects))
+            pack(self.along(i, p, whole, d, &mut reflects))
         });
         let paths = Arc::new(Paths { comes, reflects: reflects.as_slice().into(), touches });
         self.reflecting = reflects;
@@ -723,7 +763,7 @@ impl Light {
      * next that, with it, reflects over: that one reflects for both, as if
      * lit alike. What is still owed where the line ends is left out.
      */
-    fn along(&mut self, i: usize, p: [i64; 3], d: usize, reflects: &mut Vec<Reflects>) -> Rgb {
+    fn along(&mut self, i: usize, p: [i64; 3], from_whole: bool, d: usize, reflects: &mut Vec<Reflects>) -> Rgb {
         let (v, heights, steps) = (DIRECTIONS[d], self.levels[i].heights, self.shared.steps);
         let coarser = i + 1 < self.levels.len();
         // What has come so far, and how much of what comes from further on gets through.
@@ -732,7 +772,6 @@ impl Light {
         let mut owed = [0.0f32; 3];
         let mut q = p;
         let most = if coarser { MOST_STEPS } else { top_steps(heights) };
-        let from_whole = self.whole(i, p);
         let beyond = 'march: {
             for step in 1..=most {
                 let next = add(q, v);
@@ -743,17 +782,16 @@ impl Light {
                 }
                 // The parts of the step, each with its share of the light: across an edge, a site beside it, half
                 // the light each, come in by one face, then the one past it, all of it, by two (ENTERS).
-                let beside = HALVES[d].map(|faces| faces.map(|k| (add(q, FACES[k]), [lattice::opposite(k); 2])));
-                let mut met =
-                    |light: &mut Self, part: usize, (site, enters): ([i64; 3], [usize; 2]), share: f32, through: &mut [f32; 3]| {
-                        let (face, (alpha, colour), glow) = light.meets(i, site, enters);
-                        (0..3).for_each(|c| sum[c] += through[c] * share * glow[c]);
-                        (0..3).for_each(|c| owed[c] += through[c] * share * alpha[c] * colour[c]);
-                        if owed.iter().any(|&r| r > light.shared.tolerance) {
-                            reflects.push((d as u8, step as u8, part as u8, face as u8, pack(std::mem::take(&mut owed))));
-                        }
-                        alpha.map(|a| share * a)
-                    };
+                let beside = HALVES[d].map(|faces| faces.map(|k| (add(q, FACES[k]), ENTERS[k])));
+                let mut met = |light: &mut Self, part: usize, (site, enters): ([i64; 3], &[usize]), share: f32, through: &mut [f32; 3]| {
+                    let (face, (alpha, colour), glow) = light.meets(i, site, enters);
+                    (0..3).for_each(|c| sum[c] += through[c] * share * glow[c]);
+                    (0..3).for_each(|c| owed[c] += through[c] * share * alpha[c] * colour[c]);
+                    if owed.iter().any(|&r| r > light.shared.tolerance) {
+                        reflects.push(Reflects::new(d, step, part, face, pack(std::mem::take(&mut owed))));
+                    }
+                    alpha.map(|a| share * a)
+                };
                 if let Some(beside) = beside {
                     // Off a whole voxel, none comes through a whole one beside it, which touches it: all through the other.
                     let shares = if step == 1 && from_whole {
@@ -793,46 +831,52 @@ impl Light {
      * `across` of the cube of `q`, a site of level `i − 1`, where the line
      * through the middle of `q` crosses it: its sites' light from `d` comes
      * through their faces on that side, so it is bilinear between the face
-     * and the 3 beside it in its plane nearest the line, each by how much
-     * its site lets through and the finer site towards it from `q` lets
-     * through that way (`towards`), and shows no edges of their cubes. A finer
-     * cube's middle is a quarter of a coarser cube from the middles of the
-     * two nearest along each axis: weights of 3/4 and 1/4.
+     * and the 3 beside it in its plane nearest the line, and shows no edges
+     * of their cubes. A finer cube's middle is a quarter of a coarser cube
+     * from the middles of the two nearest along each axis: weights of 3/4
+     * and 1/4. Each is read as far as it lets light through, and the finer
+     * site beside `q` towards it, if it is past `q`'s cube (`through`): so
+     * none is read past a wall.
      */
     fn coarser(&mut self, i: usize, q: [i64; 3], across: usize, d: usize) -> Rgb {
-        let (cube, base) = (q.map(|c| c.div_euclid(2)), q.map(|c| (c - 1).div_euclid(2)));
-        let near = q.map(|c| if c & 1 == 0 { 0.75 } else { 0.25 });
-        let (b, c) = ((across + 1) % 3, (across + 2) % 3);
+        let cube = q.map(|c| c.div_euclid(2));
+        let axes = [(across + 1) % 3, (across + 2) % 3];
+        // Along each axis of the face, the two coarser sites nearest the line, each with its weight.
+        let sides = axes.map(|a| {
+            let (first, near) = ((q[a] - 1).div_euclid(2), if q[a] & 1 == 0 { 0.75 } else { 0.25 });
+            [(first, 1.0 - near), (first + 1, near)]
+        });
+        // Along each axis, how much gets through from `q` to the side past its cube: found once, if a site
+        // there lets light through.
+        let mut past: [Option<f32>; 2] = [None; 2];
         let (mut sum, mut total) = ([0.0f32; 3], 0.0f32);
-        for corner in 0..4 {
-            let (u, v) = (corner & 1, corner >> 1);
-            let mut site = cube;
-            (site[b], site[c]) = (base[b] + u, base[c] + v);
-            let w = [(b, u), (c, v)].iter().map(|&(a, k)| if k == 1 { near[a] } else { 1.0 - near[a] }).product::<f32>();
-            let open = self.open(i, site) * self.towards(i - 1, q, std::array::from_fn(|a| site[a] - cube[a]));
-            if open > 0.0 {
-                let light = self.light(i, site)[d];
-                total += w * open;
-                (0..3).for_each(|ch| sum[ch] += w * open * light[ch]);
+        for (y, wy) in sides[1] {
+            for (x, wx) in sides[0] {
+                let mut site = cube;
+                (site[axes[0]], site[axes[1]]) = (x, y);
+                let mut open = self.open(i, site);
+                if open > 0.0 {
+                    let mut through = 1.0;
+                    for (k, a) in axes.into_iter().enumerate().filter(|&(_, a)| site[a] != cube[a]) {
+                        let face = FACES.iter().position(|face| face[a] == site[a] - cube[a]).expect("a face");
+                        through *= *past[k].get_or_insert_with(|| self.through(i - 1, q, face));
+                    }
+                    open *= through;
+                }
+                if open > 0.0 {
+                    let (w, light) = (wx * wy, self.light(i, site)[d]);
+                    total += w * open;
+                    (0..3).for_each(|ch| sum[ch] += w * open * light[ch]);
+                }
             }
         }
         sum.map(|ch| ch / total)
     }
 
-    /**
-     * How much light gets from `q`, a site of level `i`, towards the
-     * coarser site `off` from its own (−1, 0 or 1 along each axis): what
-     * the finer sites next to `q` that way let through, each along its
-     * axis, on average over the channels. So `coarser` reads no coarser
-     * site past a wall.
-     */
-    fn towards(&mut self, i: usize, q: [i64; 3], off: [i64; 3]) -> f32 {
-        let mut through = 1.0;
-        for d in (0..F).filter(|&d| (0..3).map(|a| FACES[d][a] * off[a]).sum::<i64>() == 1) {
-            let stops = self.meets(i, add(q, FACES[d]), ENTERS[d]).1.0;
-            through *= 1.0 - stops.iter().sum::<f32>() / 3.0;
-        }
-        through
+    /** How much of what comes from `q`, a site of level `i`, gets through the site across its face `face`, on average over the channels. */
+    fn through(&mut self, i: usize, q: [i64; 3], face: usize) -> f32 {
+        let stops = self.meets(i, add(q, FACES[face]), ENTERS[face]).1.0;
+        1.0 - stops.iter().sum::<f32>() / 3.0
     }
 
     /** Over π, the light on face `f` from `light`, its directions weighed by their cosines (`weighed`). */
@@ -932,6 +976,21 @@ impl Light {
     }
 }
 
+/** How light sees a site, as VoxelGrid::light has it: how much of each channel it stops, of ALPHA, and the colour of that; what it glows. */
+type Seen = (Stops<u8>, Stops<[u8; 3]>, [u32; 3]);
+
+/** What light sees of a site (`see`), from what VoxelGrid::light has of it, where `glowing` is a glow of GLOW_ONE. */
+fn seen(((pieces, p), (medium, m), glow): Seen, glowing: f32) -> ((Rgb, Rgb), Rgb) {
+    let glow = glow.map(|g| g as f32 * glowing);
+    // What they show comes premultiplied, of COLOUR_ONE: as a share of the light on what it stops.
+    let alpha = medium.map(|m| (pieces as u32 + m as u32) as f32 / ALPHA as f32);
+    let colour = std::array::from_fn(|c| {
+        let shows = (p[c] + m[c]) as f32 / COLOUR_ONE as f32;
+        if alpha[c] > 0.0 { (shows / alpha[c]).min(1.0) } else { 0.0 }
+    });
+    ((alpha, colour), glow)
+}
+
 /** A look's colour as a share of the light on it, linear, as light adds up; looks are sRGB. */
 fn linear(look: Look) -> Rgb {
     // A power a channel, of only 256 bytes: kept.
@@ -948,10 +1007,13 @@ fn linear(look: Look) -> Rgb {
  */
 fn weighed(weights: &[f32; N], light: &[Rgb; N], touches: &Touches) -> Rgb {
     let (mut sum, mut kept) = ([0.0f32; 3], [1.0f32; 3]);
-    for (d, (w, light)) in weights.iter().zip(light).enumerate() {
+    for (w, light) in weights.iter().zip(light) {
         (0..3).for_each(|c| sum[c] += w * light[c]);
-        if let Some(touches) = touches {
-            (0..3).for_each(|c| kept[c] -= w * touches[d][c]);
+    }
+    if let Some(touches) = touches {
+        // Across the faces: DIRECTIONS' first.
+        for (w, touches) in weights.iter().zip(touches.iter()) {
+            (0..3).for_each(|c| kept[c] -= w * touches[c]);
         }
     }
     std::array::from_fn(|c| if kept[c] > 0.0 { sum[c] / kept[c] } else { 0.0 })
@@ -979,19 +1041,6 @@ fn change(before: &[Rgb; F], after: &[Rgb; F]) -> f32 {
 
 fn add(a: [i64; 3], b: [i64; 3]) -> [i64; 3] {
     [a[0] + b[0], a[1] + b[1], a[2] + b[2]]
-}
-
-/**
- * The site of the `step`th step from `p` along direction `d` that a site
- * met there is: `part` 0 the one past the step, else one beside its edge
- * (HALVES).
- */
-fn met(p: [i64; 3], d: usize, step: i64, part: usize) -> [i64; 3] {
-    let before = add(p, DIRECTIONS[d].map(|v| v * (step - 1)));
-    match (part, HALVES[d]) {
-        (0, _) | (_, None) => add(before, DIRECTIONS[d]),
-        (part, Some(faces)) => add(before, FACES[faces[part - 1]]),
-    }
 }
 
 fn dot(a: [f64; 3], b: [f64; 3]) -> f64 {
