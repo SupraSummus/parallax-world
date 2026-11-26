@@ -22,6 +22,7 @@ use std::sync::{Arc, Mutex};
 use crate::cost;
 use crate::js;
 use crate::noise::{Fixed, Fx, Rng, float, hash_text, hash64, unit};
+use crate::recent::Kept;
 use crate::sites;
 
 /** The most marks a process draws: kinds of things, each with chances of its own. */
@@ -50,7 +51,7 @@ const TRIES: u32 = 16;
 /** Slots each cache keeps values in, the last made in each: enough for a host tile's cells at any level. */
 const SLOTS: usize = 1 << 15;
 
-/** Values kept by key, the last made in each slot, for all the threads that read a world: each slot under a lock of its own. */
+/** Values kept by key, the last made in each slot, for all the threads that read a world: each slot under a lock of its own, for values shared, not copied (Kept's are). */
 struct Slots<K, V>(Box<[Slot<K, V>]>);
 
 type Slot<K, V> = Mutex<Option<(K, V)>>;
@@ -67,12 +68,8 @@ impl<K: Copy + PartialEq, V: Clone> Slots<K, V> {
             return v.clone();
         }
         let v = make();
-        self.put(slot, key, v.clone());
+        *self.0[slot].lock().expect("slot") = Some((key, v.clone()));
         v
-    }
-
-    fn put(&self, slot: usize, key: K, v: V) {
-        *self.0[slot].lock().expect("slot") = Some((key, v));
     }
 }
 
@@ -95,9 +92,9 @@ pub struct Points {
     marks: usize,
     chances: Box<dyn Fn([i64; 3]) -> Chances + Send + Sync>,
     /** By leaf, the chances at its site. */
-    sites: Slots<[i64; 3], Chances>,
+    sites: Kept<[i64; 3], Chances>,
     /** By cell, its counts. */
-    counted: Slots<(i64, [i64; 3]), Counts>,
+    counted: Kept<(i64, [i64; 3]), Counts>,
     /** By leaf holding any, its points, placed: each costs reading its chances up to TRIES times. */
     placed: Slots<[i64; 3], Arc<[Spot]>>,
 }
@@ -135,8 +132,8 @@ impl Points {
             root,
             marks,
             chances: Box::new(chances),
-            sites: Slots::new(SLOTS),
-            counted: Slots::new(SLOTS),
+            sites: Kept::new(SLOTS),
+            counted: Kept::new(SLOTS),
             placed: Slots::new(SLOTS),
         }
     }
@@ -190,7 +187,7 @@ impl Points {
     /** The chances at the site of the leaf at `leaf`, kept. */
     fn chances_at(&self, leaf: [i64; 3]) -> Chances {
         let at = self.site(leaf);
-        self.sites.get(self.slot(self.leaf, leaf), leaf, || cost::plan(self.name, self, at, || self.chances(at)))
+        self.sites.get_or(self.slot(self.leaf, leaf), leaf, || cost::plan(self.name, self, at, || self.chances(at)))
     }
 
     /** By mark, the weight of the cell `size` wide at `corner`: its leaves' chances, added (fixed point). */
@@ -216,7 +213,7 @@ impl Points {
 
     /** `counts`, kept. */
     fn kept(&self, size: i64, corner: [i64; 3]) -> Counts {
-        self.counted.get(self.slot(size, corner), (size, corner), || {
+        self.counted.get_or(self.slot(size, corner), (size, corner), || {
             if size > self.root {
                 let mut counts = [0; MARKS];
                 for root in self.cells_in(self.root, corner, corner.map(|v| v + size)) {
@@ -236,7 +233,7 @@ impl Points {
             // Its siblings' too: they are asked next.
             let (parent, mut counts) = (self.cell(2 * size, corner), [0; MARKS]);
             for (child, split) in self.corners_of(size, parent).zip(self.split(2 * size, parent)) {
-                self.counted.put(self.slot(size, child), (size, child), split);
+                self.counted.keep(self.slot(size, child), (size, child), split);
                 if child == corner {
                     counts = split;
                 }

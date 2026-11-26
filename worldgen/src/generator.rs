@@ -278,6 +278,7 @@ impl Node {
  * what is behind it along the line shows through it. One `thick`
  * (build.rs) keeps a site whole.
  */
+#[derive(Clone, Copy)]
 pub struct Span {
     pub from: i64,
     pub to: i64,

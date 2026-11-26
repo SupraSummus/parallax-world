@@ -13,7 +13,7 @@ use worldgen::scalar::Scalar;
 use worldgen::units::Units;
 
 use crate::DOCS;
-use crate::plan::{Kept, Plan, Sloped, slot};
+use crate::plan::{Kept, Plan, SLOTS, Sloped, slot};
 
 /**
  * What pulls the ground of a band towards heights of its own (Lie::shaped):
@@ -82,17 +82,12 @@ struct Band {
 
 impl Lie {
     pub fn new(height: impl Fn(i64, i64) -> Fx + Send + Sync + 'static) -> Lie {
-        Lie(Arc::new(Band { height: Box::new(height), kept: Kept::new() }))
+        Lie(Arc::new(Band { height: Box::new(height), kept: Kept::new(SLOTS) }))
     }
 
     /** The height at column (x, z), with its fraction. */
     pub fn at(&self, x: i64, z: i64) -> Fx {
-        let slot = slot(x, z);
-        self.0.kept.get(slot, x, z).unwrap_or_else(|| {
-            let h = (self.0.height)(x, z);
-            self.0.kept.keep(slot, x, z, h);
-            h
-        })
+        self.0.kept.get_or(slot(x, z), [x, z], || (self.0.height)(x, z))
     }
 
     /**

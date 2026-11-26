@@ -2,13 +2,12 @@
 //! scale and from coarser ones only.
 //! See "Composing" in docs/generators.md.
 
-use std::cell::{Cell, UnsafeCell};
-use std::mem::MaybeUninit;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::cell::Cell;
 use std::sync::{Arc, Mutex, OnceLock};
 
 use worldgen::grid::Box3;
 use worldgen::noise::{Fixed, Fx, Rng, hash64};
+use worldgen::recent;
 use worldgen::sites::{read_for, spacing, where_asked};
 
 use crate::DOCS;
@@ -19,7 +18,7 @@ thread_local! {
 }
 
 /** Slots a plan keeps values in: as many as 32 tiles have columns, for the tiles the world's threads make at once and what their layers read around them. */
-const SLOTS: usize = 1 << 15;
+pub(crate) const SLOTS: usize = 1 << 15;
 const _: () = assert!(SLOTS.is_power_of_two());
 /** Column (x, z) takes slot `sum(x, z) >> SHIFT`: each a run of 2^SHIFT sums. */
 const SHIFT: u32 = 64 - SLOTS.trailing_zeros();
@@ -35,61 +34,8 @@ fn sum(x: i64, z: i64) -> u64 {
     (x as u64).wrapping_mul(0xd548ecfaef79b2e7).wrapping_add((z as u64).wrapping_mul(0xf0d62a6465469d21))
 }
 
-/**
- * Values by column, the last kept in each of SLOTS, for all the threads
- * that read a world together: read without waiting, as nearly every read
- * finds its column kept. A column is a function of the world alone, so
- * one not found kept, or not kept at all, is only made again.
- */
-pub(crate) struct Kept<T>(Box<[Slot<T>]>);
-
-/**
- * A slot: a column and its value, and how many times it was written, odd
- * while it is (a sequence lock). A reader copies it and takes the copy
- * only if no one wrote meanwhile. By the letter its read may race a write,
- * which Rust does not allow even of bytes dropped: as sequence locks do.
- */
-struct Slot<T> {
-    written: AtomicU32,
-    kept: UnsafeCell<(i64, i64, T)>,
-}
-
-// SAFETY: `kept` is written only by the one that made `written` odd, and what is read of it meanwhile is not used.
-unsafe impl<T: Send> Sync for Slot<T> {}
-
-impl<T: Copy + Default> Kept<T> {
-    pub(crate) fn new() -> Kept<T> {
-        let empty = || Slot { written: AtomicU32::new(0), kept: UnsafeCell::new((i64::MIN, 0, T::default())) };
-        Kept((0..SLOTS).map(|_| empty()).collect())
-    }
-
-    /** Column (x, z), if kept in `slot`: its own (`slot`), or, read dithered, its column's (Plan::fetch). */
-    #[inline]
-    pub(crate) fn get(&self, slot: usize, x: i64, z: i64) -> Option<T> {
-        let slot = &self.0[slot];
-        let before = slot.written.load(Ordering::Acquire);
-        // SAFETY: the copy may be torn by one writing now, so it is no value yet: only bytes, which T, Copy, is whole in.
-        let copy = unsafe { std::ptr::read_volatile(slot.kept.get().cast::<MaybeUninit<(i64, i64, T)>>()) };
-        std::sync::atomic::fence(Ordering::Acquire);
-        if before & 1 != 0 || slot.written.load(Ordering::Relaxed) != before {
-            return None;
-        }
-        // SAFETY: none wrote while it was copied, so it is what the last one to write kept, whole.
-        let (kx, kz, value) = unsafe { copy.assume_init() };
-        ((kx, kz) == (x, z)).then_some(value)
-    }
-
-    /** Keeps column (x, z) in `slot`, unless another thread is keeping one there now. */
-    pub(crate) fn keep(&self, slot: usize, x: i64, z: i64, value: T) {
-        let slot = &self.0[slot];
-        let before = slot.written.load(Ordering::Relaxed);
-        if before & 1 == 0 && slot.written.compare_exchange(before, before + 1, Ordering::Acquire, Ordering::Relaxed).is_ok() {
-            // SAFETY: `written` is odd by this thread, so no other writes, and readers drop what they copy.
-            unsafe { slot.kept.get().write((x, z, value)) };
-            slot.written.store(before.wrapping_add(2), Ordering::Release);
-        }
-    }
-}
+/** Values by column (x, z), the last kept in each of SLOTS, for all the threads that read a world together. */
+pub(crate) type Kept<T> = recent::Kept<[i64; 2], T>;
 
 /** The slot of column (x, z). */
 #[inline]
@@ -150,7 +96,7 @@ pub struct Plan<T> {
 
 impl<T: Copy + Default> Plan<T> {
     pub fn new(name: &'static str, scale: i64, make: impl Fn(i64, i64) -> T + Send + Sync + 'static) -> Plan<T> {
-        Plan { rule: Rule { name, scale, filter: false }, dithered: false, kept: Kept::new(), make: Box::new(make) }
+        Plan { rule: Rule { name, scale, filter: false }, dithered: false, kept: Kept::new(SLOTS), make: Box::new(make) }
     }
 
     /**
@@ -181,7 +127,7 @@ impl<T: Copy + Default> Plan<T> {
             Some((spacing, [dx, _, dz])) if self.dithered && spacing > self.rule.scale => (x + dx, z + dz),
             _ => (x, z),
         };
-        match self.kept.get(at, x, z) {
+        match self.kept.get(at, [x, z]) {
             Some(value) => (value, false),
             None => (self.make(at, x, z), true),
         }
@@ -192,13 +138,13 @@ impl<T: Copy + Default> Plan<T> {
     #[inline(never)]
     fn make(&self, slot: usize, x: i64, z: i64) -> T {
         let value = self.rule.making(self, x, z, || (self.make)(x, z));
-        self.kept.keep(slot, x, z, value);
+        self.kept.keep(slot, [x, z], value);
         value
     }
 
     /** Column (x, z), if kept: none is made. */
     fn kept(&self, x: i64, z: i64) -> Option<T> {
-        self.kept.get(slot(x, z), x, z)
+        self.kept.get(slot(x, z), [x, z])
     }
 }
 
@@ -540,32 +486,6 @@ mod tests {
     use worldgen::noise::fx;
     use worldgen::sites::footprint;
     use worldgen::units::Units;
-
-    /** Threads keeping columns in the same few slots, each a value many words long that says its column: none reads one torn, or another's. */
-    #[test]
-    fn a_column_read_while_others_are_kept_is_whole_or_not_found() {
-        let kept = Kept::<[i64; 16]>::new();
-        let found = std::sync::atomic::AtomicUsize::new(0);
-        std::thread::scope(|scope| {
-            for thread in 0..4 {
-                let (kept, found) = (&kept, &found);
-                scope.spawn(move || {
-                    let mut random = Rng::new(thread);
-                    for _ in 0..1 << 20 {
-                        let (slot, x, z) = (random.below(4) as usize, random.below(8) as i64, random.below(8) as i64);
-                        match kept.get(slot, x, z) {
-                            Some(value) => {
-                                assert_eq!(value, [x * 8 + z; 16], "column ({x}, {z})");
-                                found.fetch_add(1, Ordering::Relaxed);
-                            }
-                            None => kept.keep(slot, x, z, [x * 8 + z; 16]),
-                        }
-                    }
-                });
-            }
-        });
-        assert!(found.load(Ordering::Relaxed) > 0, "some columns found kept");
-    }
 
     #[test]
     fn a_sloped_plan_is_within_its_range_wherever_asked() {

@@ -257,11 +257,18 @@ impl Grid {
             });
             part.bricks[place] = to as i32;
         }
+        // Each record's site where it is in the part, and where it starts here, sorted: no record copied till it is placed.
         let kept = |words: &[u32], per: usize| -> Vec<u32> {
             let to = |i: u32| moved[i as usize / BRICK_SITES].map(|to| (to * BRICK_SITES + i as usize % BRICK_SITES) as u32);
-            let mut sites: Vec<Vec<u32>> = words.chunks(per).filter_map(|w| Some([&[to(w[0])?], &w[1..]].concat())).collect();
-            sites.sort_unstable_by_key(|w| w[0]);
-            sites.concat()
+            let mut sites: Vec<(u32, u32)> =
+                words.chunks_exact(per).enumerate().filter_map(|(r, w)| Some((to(w[0])?, (r * per) as u32))).collect();
+            sites.sort_unstable_by_key(|&(to, _)| to);
+            let mut kept = Vec::with_capacity(sites.len() * per);
+            for (to, from) in sites {
+                kept.push(to);
+                kept.extend_from_slice(&words[from as usize + 1..][..per - 1]);
+            }
+            kept
         };
         (part.views, part.glow) = (kept(&self.views, VIEW_WORDS), kept(&self.glow, GLOW_WORDS));
         part.stops = kept(&self.stops, STOPS_WORDS);

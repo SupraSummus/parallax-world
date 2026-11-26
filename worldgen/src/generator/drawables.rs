@@ -117,8 +117,9 @@ fn draw_field(field: &Field, lines: &Lines, seed: u64, s: i64, clip: &Box3, floo
         Lines::Spans { .. } => (LINES, hi[axis] - lo[axis]),
     };
     let mut site = [0i64; 3];
-    // A medium's site's parts, kept from site to site.
+    // Kept from site to site and line to line: a medium's site's parts, a line's solid spans, their parts of a site.
     let mut parts: Vec<Part> = Vec::new();
+    let (mut solid, mut solid_parts) = (Vec::new(), Vec::new());
     let (mut drew, mut unlike) = (None, None);
     let mut record = |_: Look, _: Op, share: u32, _: u32, x: i64, y: i64, z: i64| drew = drew.or((share > 0).then_some([x, y, z]));
     let blocks = (lo[a]..hi[a]).step_by(side as usize).flat_map(|u| (lo[b]..hi[b]).step_by(side as usize).map(move |v| (u, v)));
@@ -193,13 +194,14 @@ fn draw_field(field: &Field, lines: &Lines, seed: u64, s: i64, clip: &Box3, floo
                             }
                         }
                         // Solid spans cover the line's sites together, as they lie along it.
-                        let (solid, thin): (Vec<&Span>, Vec<&Span>) = spans.iter().partition(|span| span.holds == Holds::Solid);
-                        cover(&solid, axis, (first, hi[axis]), s, op, &mut |look, share, w| {
+                        solid.clear();
+                        solid.extend(spans.iter().filter(|span| span.holds == Holds::Solid));
+                        cover(&solid, &mut solid_parts, axis, (first, hi[axis]), s, op, &mut |look, share, w| {
                             site[axis] = w;
                             put(look, op, share, picked(site[0], site[1], site[2]), site[0], site[1], site[2]);
                         });
                         // A medium is in every site its span reaches, whole or in part.
-                        for span in thin {
+                        for span in spans.iter().filter(|span| span.holds != Holds::Solid) {
                             let Holds::Medium(e) = span.holds else { unreachable!("solid spans are covered") };
                             let whole = medium(e);
                             let mut w = ((span.from - s).div_euclid(s) + 1).max(first);
@@ -293,16 +295,22 @@ fn held(parts: &[Part], depth: f64) -> [u32; 3] {
  * carve frees (`slabs`). A face across the axis sees the span its rays
  * meet first, the others the one that fills most of the site. At every
  * level alike: a site holds what its part of the spans looks like, whole
- * only if they hold all of its voxel.
+ * only if they hold all of its voxel. `parts` is room for the spans'
+ * parts of a site, kept by the caller from line to line.
  */
-fn cover(spans: &[&Span], axis: usize, (lo, hi): (i64, i64), s: i64, op: Op, put: &mut dyn FnMut(Look, u32, i64)) {
+fn cover(
+    spans: &[Span],
+    parts: &mut Vec<(f64, f64, Kind)>,
+    axis: usize,
+    (lo, hi): (i64, i64),
+    s: i64,
+    op: Op,
+    put: &mut dyn FnMut(Look, u32, i64),
+) {
     let (Some(from), Some(to)) = (spans.iter().map(|span| span.from).min(), spans.iter().map(|span| span.to).max()) else { return };
     // The sites whose voxels, [w, w + 1) · s along the axis, meet [from, to].
     let first = ((from - s).div_euclid(s) + 1).max(lo);
     let mut w = first;
-    // Kept from site to site: a line has thousands.
-    let mut parts: Vec<(f64, f64, Kind)> = Vec::new();
-    let mut ends: Vec<(f64, f64)> = Vec::new();
     while w * s < to && w < hi {
         let at = |end: i64| (2.0 * (end - w * s) as f64 / s as f64 - 1.0).clamp(-1.0, 1.0);
         // Each span's part of the voxel, −1 to 1 along the axis, in order.
@@ -325,9 +333,7 @@ fn cover(spans: &[&Span], axis: usize, (lo, hi): (i64, i64), s: i64, op: Op, put
         parts.sort_by(|p, q| p.0.total_cmp(&q.0));
         if let (Some(bottom), Some(top)) = (parts.first(), parts.iter().max_by(|p, q| p.1.total_cmp(&q.1))) {
             let most = parts.iter().max_by(|p, q| (p.1 - p.0).total_cmp(&(q.1 - q.0))).expect("a part").2;
-            ends.clear();
-            ends.extend(parts.iter().map(|p| (p.0, p.1)));
-            let [across, along] = [true, false].map(|across| share(slabs(across, ends.iter().copied(), op == Op::Carve)));
+            let [across, along] = [true, false].map(|across| share(slabs(across, parts.iter().map(|p| (p.0, p.1)), op == Op::Carve)));
             let faces = Faces::along(axis, [(bottom.2, across), (most, along), (top.2, across)]);
             put(Look { kind: most, faces: Some(faces) }, across.max(along), w);
         }

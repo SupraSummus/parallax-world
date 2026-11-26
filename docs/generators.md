@@ -537,11 +537,13 @@ layers read any plan.
 
 A world is one for all the threads that make and light its tiles (`World` is `Sync`):
 what it keeps is a function of the world alone, so whichever thread makes it keeps it for all.
-A plan's values are small, the last kept in each slot (`Kept`);
+A plan's values are small, the last kept in each slot (`Kept` in `recent.rs`),
+as are points' chances at their leaves and their cells' counts;
 a few large ones, a curve's pieces, are a `Large`'s, each held for good.
 Both are read without waiting.
 What is asked for less often is under a lock:
-things measured and a settlement's layout (`Memo` in `recent.rs`), points' cells.
+things measured and a settlement's layout (`Memo` in `recent.rs`),
+the points placed in a leaf, the rooms around a block.
 So a world's closures are `Send` and `Sync`: they capture `Arc`s,
 and keep what they keep in one of these.
 
