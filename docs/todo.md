@@ -476,6 +476,12 @@ Numbers are for the forest at 1280×800, as measured when written.
   each reading the coarsest level a line's length further round;
   rounds are capped (`ROUNDS`), so light that bounces more is lost.
   A coarser level cannot take over the rest at the coarsest.
+- **Light forgets by how many sites it began, not by what they hold** (`KEPT_SITES`),
+  though each byte a site keeps costs time too
+  ([light.md](light.md), "In native, and what it costs"):
+  counted by bytes, smaller sites would be kept longer.
+  The largest misses are a reflecting site's rounds,
+  three pointers away (its lock, its `Site`, its rounds' vector).
 
 ## Native
 

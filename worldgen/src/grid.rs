@@ -521,6 +521,7 @@ impl VoxelGrid {
     }
 
     /** Site (x, y, z)'s index: Err(brick) if that brick is empty, None outside the box or off the sites. */
+    #[inline]
     fn slot(&self, x: i64, y: i64, z: i64) -> Option<Result<usize, usize>> {
         let (i, j, k) = (x - self.min[0], y - self.min[1], z - self.min[2]);
         if i < 0 || i >= self.n[0] || j < 0 || j >= self.n[1] || k < 0 || k >= self.n[2] {
@@ -635,6 +636,7 @@ impl VoxelGrid {
     }
 
     /** What site `i` is seen by: its pieces as a whole, and its medium. */
+    #[inline]
     fn site(&self, i: usize) -> Site {
         Site { pieces: self.pieces.get(i), medium: self.medium.get(i) }
     }
@@ -760,6 +762,7 @@ impl VoxelGrid {
      * of COLOUR_ONE); and its glow. Each the face's, where they differ
      * (`views`).
      */
+    #[inline]
     pub fn light(&self, x: i64, y: i64, z: i64, kind: usize) -> (Stops<u8>, Stops<[u8; 3]>, [u32; 3]) {
         match self.slot(x, y, z) {
             Some(Ok(i)) => {
@@ -776,6 +779,7 @@ impl VoxelGrid {
     }
 
     /** Of ALPHA, how much of the rays through site (x, y, z) it stops. */
+    #[inline]
     pub fn alpha(&self, x: i64, y: i64, z: i64) -> u8 {
         match self.slot(x, y, z) {
             Some(Ok(i)) => self.site(i).stops(),
@@ -889,6 +893,7 @@ impl Site {
     }
 
     /** Of ALPHA, how much of its rays it stops: its pieces, and its medium of the rest, in the channel it stops least. */
+    #[inline]
     fn stops(&self) -> u8 {
         let (pieces, medium, all) = (self.pieces.0 as u32, least(self.medium.0) as u32, ALPHA as u32);
         ((pieces * all + (all - pieces) * medium + all / 2) / all) as u8
@@ -907,6 +912,7 @@ impl Site {
     }
 
     /** Its pieces as a part that stops `pieces` of its rays and shows `colour`, and its medium of the rest: each how much it stops and shows. */
+    #[inline]
     fn with_medium(&self, (pieces, colour): Sight) -> (Stops<u8>, Stops<[u8; 3]>) {
         let rest = |v: u32| ((ALPHA - pieces) as u64 * v as u64 + ALPHA as u64 / 2) / ALPHA as u64;
         let (medium, of) = self.medium;
