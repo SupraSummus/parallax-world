@@ -201,15 +201,15 @@ fn draw_field(field: &Field, lines: &Lines, seed: u64, s: i64, clip: &Box3, floo
                         // A medium is in every site its span reaches, whole or in part.
                         for span in thin {
                             let Holds::Medium(e) = span.holds else { unreachable!("solid spans are covered") };
-                            let first = ((span.from - s).div_euclid(s) + 1).max(first);
-                            let mut w = first;
+                            let whole = medium(e);
+                            let mut w = ((span.from - s).div_euclid(s) + 1).max(first);
                             while w * s < span.to && w < hi[axis] {
                                 let at = |end: i64| (2.0 * (end - w * s) as f64 / s as f64 - 1.0).clamp(-1.0, 1.0);
                                 let own = (at(span.from), at(span.to));
                                 site[axis] = w;
                                 let pick = picked(site[0], site[1], site[2]);
                                 if own == (-1.0, 1.0) {
-                                    put(span.kind.into(), op, medium(e), pick, site[0], site[1], site[2]);
+                                    put(span.kind.into(), op, whole, pick, site[0], site[1], site[2]);
                                 } else if own.0 < own.1 {
                                     parts.clear();
                                     parts.extend(solid.iter().map(|other| {

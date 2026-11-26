@@ -7,11 +7,11 @@ moor boulders lichen	5	0.052	0.105
 moor boulders stone	2	0.078	0.100
 moor boulders stone	4	0.005	0.103
 moor boulders stone	5	0.056	0.123
-steadings drystone	5	0.047	0.078
-steadings lichen	5	0.047	0.078
-steadings stone	5	0.047	0.078
-steadings thatch	5	0.047	0.078
-steadings timber	5	0.047	0.078
+steadings drystone	5	0.048	0.078
+steadings lichen	5	0.048	0.078
+steadings stone	5	0.048	0.078
+steadings thatch	5	0.048	0.078
+steadings timber	5	0.048	0.078
 steadings/cairns lichen	3	0.050	0.073
 steadings/cairns lichen	4	0.070	0.091
 steadings/cairns lichen	5	0.070	0.102

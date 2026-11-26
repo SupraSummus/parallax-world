@@ -157,13 +157,13 @@ Numbers are for the forest at 1280×800, as measured when written.
 - **Sites unlike through their faces are the dearest to put.**
   A seventh of the valley's sites are in `views` (`VoxelGrid`),
   which take as much as all the sites' pieces,
-  held by sight (`Sights`); each its own twelve, twice that.
+  held by sight (`Sights`); each its own six, twice that.
   Half are alike another site's: held once, they took a third less,
   for a grid not to be changed once held. Not kept.
   What a site's faces see, and what is added to them,
   are held each value once (`Faces` in `grid.rs`),
   so a put adds to each class of faces once (`pieces` in `generate.rs`),
-  two or three, not twelve;
+  two or three, not six;
   still, at level 4, putting them is over a tenth of the instructions.
   Their glows are kept apart (`glows`), as few glow:
   one record a site would be read and written once, not twice,
@@ -194,6 +194,15 @@ Numbers are for the forest at 1280×800, as measured when written.
   its nearest town twice at level 8 (the land asks at its dithered points).
   With eight times the slots, each was made once;
   pairs or fours of slots per column cost more than they saved.
+  Near columns' slots lie far apart in memory, so most lookups miss the cache:
+  on one thread a quarter of the slots took no longer,
+  but a host's threads make tiles together; slots keyed in 32 bits saved nothing.
+- **Levels share no plan columns.**
+  A level reads each site at its cube's middle (`sites::middle`),
+  so no two levels read the same columns,
+  and a host making every level around the camera makes each one's ground anew.
+  Middles chosen to nest would share them,
+  but read a coarse site a sixth of it off its middle.
 
 ## Checks and cost
 
@@ -815,7 +824,7 @@ Composing generators (section "Composing" of `docs/generators.md`), untried:
 - More populations at `Points`, their far forms from what stands:
   the forest's boulders, logs and plants, the valley's haystacks.
   Moved alone they cost as much:
-  their chances, read at every leaf's corners, read the land
+  their chances, read at every leaf's site, read the land
   as their refused anchors read the ground.
 - Bid per quantity: a land per channel (use, ground, wetness),
   each part bidding in those it cares about, as the towns' terrace needs.
