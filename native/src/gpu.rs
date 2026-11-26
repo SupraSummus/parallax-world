@@ -32,10 +32,11 @@ pub fn instance() -> wgpu::Instance {
 
 /**
  * What the chunks' compositor needs of a device: draws listed on the GPU,
- * a flat picture's runs each, and the pictures cut to their faces' rays
- * (compositor.wgsl).
+ * a flat picture's runs each, the pictures cut to their faces' rays, and
+ * pictures of medium laid on it a channel apart (compositor.wgsl).
  */
-pub const FEATURES: wgpu::Features = wgpu::Features::MULTI_DRAW_INDIRECT_COUNT.union(wgpu::Features::CLIP_DISTANCES);
+pub const FEATURES: wgpu::Features =
+    wgpu::Features::MULTI_DRAW_INDIRECT_COUNT.union(wgpu::Features::CLIP_DISTANCES).union(wgpu::Features::DUAL_SOURCE_BLENDING);
 
 /**
  * FEATURES, as a device of `adapter` is asked for them: all, but in a

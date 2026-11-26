@@ -202,31 +202,36 @@ fn pink<const WHITE: bool, const VEILED: bool>(_: u64) -> worldgen::World {
 
 /**
  * A medium stops each channel the more, the darker its colour there
- * (worldgen's stops_faster, as voxels.wgsl's lets_through draws it): pink, half as bright (linear) in green as in red,
+ * (worldgen's stops_faster, as voxels.wgsl's lets_through and compositor.wgsl's veil_fragment draw it):
+ * pink, half as bright (linear) in green as in red,
  * lets through of red what its extinction says, and of green that twice over.
- * What a white wall behind it shows over a black one is what it lets through.
+ * What a white wall behind it shows over a black one is what it lets through,
+ * of what the walls bare show: with whatever else shows there (between flat pictures, the sky) left out.
  */
 #[test]
 #[ignore = "draws on the GPU: needs Vulkan, as Mesa's software one"]
-fn a_medium_of_voxels_stops_more_of_the_channels_its_colour_is_darker_in() {
-    // The mean of red and of green over 9 × 9 pixels in the middle of the picture.
-    let seen = |make: Make| {
-        let (width, pixels) = along_a_face(Kind::Voxels, make);
-        [0, 1].map(|c| {
-            (96..=104)
-                .flat_map(|j| (156..=164).map(move |i| (i, j)))
-                .map(|(i, j)| f64::from(pixels[4 * (j * width as usize + i) + c]))
-                .sum::<f64>()
-                / 81.0
-        })
-    };
-    let [bare, white, black] = [seen(pink::<true, false>), seen(pink::<true, true>), seen(pink::<false, true>)];
-    let [red, green] = [0, 1].map(|c| (white[c] - black[c]) / bare[c]);
-    let expected = (-0.015 * (FAR - NEAR) as f64 / std::f64::consts::SQRT_2).exp();
-    assert!((red - expected).abs() < 0.01, "red: {red:.3} let through, {expected:.3} expected");
-    let [most, less] = [0xbc, 0x89].map(|c| f64::from(lattice::light::srgb_to_linear(f32::from(c as u8) / 255.0)));
-    let expected = expected.powf(most / less);
-    assert!((green - expected).abs() < 0.01, "green: {green:.3} let through, {expected:.3} expected");
+fn a_medium_stops_more_of_the_channels_its_colour_is_darker_in() {
+    for kind in [Kind::Flat, Kind::Voxels] {
+        // The mean of red and of green over 9 × 9 pixels in the middle of the picture.
+        let seen = |make: Make| {
+            let (width, pixels) = along_a_face(kind, make);
+            [0, 1].map(|c| {
+                (96..=104)
+                    .flat_map(|j| (156..=164).map(move |i| (i, j)))
+                    .map(|(i, j)| f64::from(pixels[4 * (j * width as usize + i) + c]))
+                    .sum::<f64>()
+                    / 81.0
+            })
+        };
+        let [white, black] = [seen(pink::<true, true>), seen(pink::<false, true>)];
+        let [bare_white, bare_black] = [seen(pink::<true, false>), seen(pink::<false, false>)];
+        let [red, green] = [0, 1].map(|c| (white[c] - black[c]) / (bare_white[c] - bare_black[c]));
+        let expected = (-0.015 * (FAR - NEAR) as f64 / std::f64::consts::SQRT_2).exp();
+        assert!((red - expected).abs() < 0.01, "{kind:?}: red {red:.3} let through, {expected:.3} expected");
+        let [most, less] = [0xbc, 0x89].map(|c| f64::from(lattice::light::srgb_to_linear(f32::from(c as u8) / 255.0)));
+        let expected = expected.powf(most / less);
+        assert!((green - expected).abs() < 0.01, "{kind:?}: green {green:.3} let through, {expected:.3} expected");
+    }
 }
 
 /** A white wall behind two slabs of medium, a red one and a green one, the red nearer if `RED_NEAR`. */

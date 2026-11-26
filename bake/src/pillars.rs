@@ -15,6 +15,8 @@ pub struct Voxel {
     pub site: [i32; 3],
     /** Its look along the face: the mean of how it looks through the faces turned towards the camera (lattice's `facing`). */
     pub look: Look,
+    /** Of ALPHA, how much it stops of each channel of a ray crossing it along an axis (lattice's Grid::stops): its alpha, unless a medium's channels differ. */
+    pub stops: [u8; 3],
     /** Faces whose neighbour across them lets rays through: none, or a see-through one. */
     pub open: u8,
     /** Faces drawn because the chunk is cut there: their neighbour is in another chunk. */
@@ -158,14 +160,22 @@ pub struct Medium {
     pub column: [i32; 2],
     /** Its slab's first layer, past the cell's plane, in half layers: every cell's slab there starts there. */
     pub first: i32,
-    /**
-     * How much its voxels stop of a ray crossing each along an axis, as
-     * optical depth: −ln of what gets through each, added up; of those in
-     * its slab's nearer half and its farther.
-     */
-    pub depth: [f32; 2],
-    /** Its voxels' colour, their mean by how much each stops (RGBA, see voxel_colour, its alpha whole). */
+    /** Its slab's nearer half and its farther. */
+    pub halves: [Half; 2],
+}
+
+/**
+ * A half of a slab of a column of medium as a voxel of it: what its
+ * voxels do to a ray along the axis, which meets them near to far, each
+ * stopping of each channel what it stops and sending its colour of that.
+ * So halves add up as their voxels do, whatever their depth.
+ */
+#[derive(Clone, Copy)]
+pub struct Half {
+    /** What it sends of each channel, over how much it stops of it (RGBA, see voxel_colour, its alpha whole). */
     pub colour: u32,
+    /** How much it stops of each channel, as optical depth: −ln of what gets through. */
+    pub depth: [f32; 3],
 }
 
 /** The middle site's layer of the slab of `slab` layers holding layer c of column a, whose sites are c ≡ a (mod k). */
@@ -191,33 +201,37 @@ pub fn cell_medium(
     least: [i32; 2],
     owns: &dyn Fn(i32, i32, i32) -> bool,
 ) -> Vec<Medium> {
-    // By slab and column: the optical depths of its halves, and the colours times them.
-    let mut slabs: HashMap<[i32; 3], ([f64; 2], [f64; 3])> = HashMap::new();
-    for v in voxels.iter().filter(|v| v.alpha() != ALPHA && v.alpha() != 0 && v.open & seen != 0) {
+    // Of each channel of a half, what gets through so far, and what it sent.
+    type Sum = ([f64; 3], [f64; 3]);
+    // By slab and column, each half's.
+    let mut slabs: HashMap<[i32; 3], [Sum; 2]> = HashMap::new();
+    let mut medium: Vec<&Voxel> = voxels.iter().filter(|v| v.alpha() != ALPHA && v.alpha() != 0 && v.open & seen != 0).collect();
+    // Near to far, as a ray along the axis meets them.
+    medium.sort_unstable_by_key(|v| v.site[2]);
+    for v in medium {
         let [a, b, c] = v.site;
-        let depth = -(1.0 - f64::from(v.alpha()) / f64::from(ALPHA)).ln();
         let rgb = colour(v);
         let (s, into) = ((c - 1).div_euclid(slab), (c - 1).rem_euclid(slab));
-        let (depths, colours) = slabs.entry([s, b, a]).or_default();
-        depths[usize::from(2 * into >= slab)] += depth;
-        for (n, sum) in colours.iter_mut().enumerate() {
-            *sum += depth * f64::from((rgb >> (8 * n)) & 0xff);
+        let halves = slabs.entry([s, b, a]).or_insert([([1.0; 3], [0.0; 3]); 2]);
+        let (through, sent) = &mut halves[usize::from(2 * into >= slab)];
+        for n in 0..3 {
+            let stops = f64::from(v.stops[n]) / f64::from(ALPHA);
+            sent[n] += through[n] * stops * f64::from((rgb >> (8 * n)) & 0xff);
+            through[n] *= 1.0 - stops;
         }
     }
+    let half = |(through, sent): Sum| {
+        let channel = |n: usize| ((sent[n] / (1.0 - through[n]).max(f64::MIN_POSITIVE)).round() as u32).min(255) << (8 * n);
+        Half { colour: channel(0) | channel(1) | channel(2) | 0xff << 24, depth: through.map(|t| -t.ln() as f32) }
+    };
     // By slab, row and column.
     let mut kept: Vec<[i32; 3]> = slabs.keys().copied().filter(|&[s, b, a]| owns(a, b, slab_middle(s * slab + 1, a, slab, k))).collect();
     kept.sort_unstable();
     kept.into_iter()
-        .map(|[s, b, a]| {
-            let (depths, colours) = slabs[&[s, b, a]];
-            let all: f64 = depths.iter().sum();
-            let channel = |n: usize| ((colours[n] / all.max(f64::MIN_POSITIVE)).round() as u32).min(255) << (8 * n);
-            Medium {
-                column: [a - least[0], b - least[1]],
-                first: 2 * (s * slab + 1) - centre,
-                depth: depths.map(|d| d as f32),
-                colour: channel(0) | channel(1) | channel(2) | 0xff << 24,
-            }
+        .map(|[s, b, a]| Medium {
+            column: [a - least[0], b - least[1]],
+            first: 2 * (s * slab + 1) - centre,
+            halves: slabs[&[s, b, a]].map(half),
         })
         .collect()
 }
@@ -229,7 +243,7 @@ mod tests {
 
     #[test]
     fn colours_a_voxel_by_its_open_faces_or_else_its_cut_ones() {
-        let voxel = |open: u8, cut: u8| Voxel { site: [0; 3], look: 0xff00_0000 | (100 * 0x0001_0101), open, cut };
+        let voxel = |open: u8, cut: u8| Voxel { site: [0; 3], look: 0xff00_0000 | (100 * 0x0001_0101), stops: [ALPHA; 3], open, cut };
         // Its top and its −x side: their mean; else its cut bottom.
         let mean = ((face_shade(3) + face_shade(0)) / 2.0 * 100.0).round() as u32;
         assert_eq!(voxel_colour(&voxel(0b1001, 0b100)), 0xff00_0000 | (mean * 0x0001_0101));
@@ -244,6 +258,43 @@ mod tests {
                 let towards = n[0] * face.f[0] + n[1] * face.f[1] + n[2] * face.f[2];
                 // Turned towards the camera, seen; away, not; beside the axis, seen by the rays slanting towards it.
                 assert_eq!(seen & (1 << k) != 0, towards <= 0, "{face:?} kind {k}");
+            }
+        }
+    }
+
+    #[test]
+    fn halves_of_any_depth_add_up_as_their_voxels_do() {
+        // A column of see-through voxels unlike in colour and in what they stop of each channel.
+        let face = faces()[0];
+        let voxels: Vec<Voxel> = (1..=8)
+            .map(|c: i32| {
+                let n = c as u8;
+                let look = u32::from_le_bytes([31 * n, 255 - 25 * n, 30 + 20 * n, 30]);
+                Voxel { site: [0, 0, c], look, stops: [90 + 20 * (n % 3), 30, 5 * n], open: 0b11_1111, cut: 0 }
+            })
+            .collect();
+        let halves = |slab: i32| {
+            let medium = cell_medium(seen(&face), 1, &mut |v: &Voxel| v.look, &voxels, 0, slab, [0, 0], &|_, _, _| true);
+            medium.into_iter().flat_map(|m| m.halves).collect::<Vec<Half>>()
+        };
+        // Near over far: what each sends, and lets through of what is behind.
+        let over = |(sent, through): ([f64; 3], [f64; 3]), half: &Half| -> ([f64; 3], [f64; 3]) {
+            let lets = half.depth.map(|d| f64::from(-d).exp());
+            let sends: [f64; 3] = std::array::from_fn(|n| f64::from((half.colour >> (8 * n)) & 0xff) * (1.0 - lets[n]));
+            (std::array::from_fn(|n| sent[n] + through[n] * sends[n]), std::array::from_fn(|n| through[n] * lets[n]))
+        };
+        let whole = halves(16);
+        assert_eq!(whole[1].depth, [0.0; 3], "all in the nearer half");
+        let one = [&whole[0]].into_iter().fold(([0.0; 3], [1.0; 3]), over);
+        for slab in [2, 4, 8] {
+            let added = halves(slab).iter().fold(([0.0; 3], [1.0; 3]), over);
+            for n in 0..3 {
+                assert!((added.0[n] - one.0[n]).abs() < 2.0, "slab {slab}, channel {n}: sends {:.1}, {:.1} in one", added.0[n], one.0[n]);
+                assert!(
+                    (added.1[n] - one.1[n]).abs() < 1e-3 * one.1[n].max(1e-3),
+                    "slab {slab}, channel {n}: lets through {:.4}",
+                    added.1[n]
+                );
             }
         }
     }
