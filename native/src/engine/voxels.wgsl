@@ -5,7 +5,7 @@
 // samples met, and takes the nearest it enters (resolve_fragment).
 // See-through voxels (a medium: fog, water, a far canopy) add up on the way,
 // in the order the ray meets them, each by its path through it; pieces
-// held in part (fcc's in_part) show whole or not at all, by a coin of
+// held in part (lattice's in_part) show whole or not at all, by a coin of
 // their site, as in every host (`whole_or_none`).
 // A voxel shows how it looks along the ray (`seen`), times the
 // light on it: shaded, by the way its surface faces; lit, the light its tile
@@ -57,19 +57,19 @@ fn entry(l: Level, b: vec3i) -> u32 {
   return l.offset + u32((w.z * WINDOW + w.y) * WINDOW + w.x);
 }
 
-// Whether no voxel meets cell `k` of scale `j` (voxels.rs's CELLS: k its
-// corner, in blocks of 4^j bricks of the level) and no brick around it is unknown.
+// Whether cell `k` of scale `j` (voxels.rs's CELLS: a cube of 4^(j + 1)
+// bricks of the level, k in such cubes) holds no voxel and no unknown brick.
 fn hollow(l: Level, k: vec3i, j: u32) -> bool {
-  let side = WINDOW >> (2u * j);
+  let side = WINDOW >> (2u * (j + 1u));
   let w = k & vec3i(side - 1);
-  return filled[l.filled + j * CELLS + u32(((w.z * side + w.y) * side + w.x) >> 1)] == 0u;
+  return filled[l.filled + j * CELLS + u32((w.z * side + w.y) * side + w.x)] == 0u;
 }
 
 @group(0) @binding(0) var<uniform> globals: Globals;
 @group(0) @binding(1) var<storage, read> levels: array<Level>;
 // Per level, its window's bricks' slots in `cells`, EMPTY or UNKNOWN (no tile yet: rays take the next level).
 @group(0) @binding(2) var<storage, read> bricks: array<i32>;
-// Per slot of the pool, its brick's 256 sites (Grid's order), each its look (fcc's Look), a word each.
+// Per slot of the pool, its brick's 256 sites (Grid's order), each its look (lattice's Look), a word each.
 @group(0) @binding(3) var<storage, read> cells: array<u32>;
 // The eye in the world (grid 0's units).
 @group(0) @binding(4) var<uniform> eye: vec4f;
@@ -119,7 +119,7 @@ const NONE = 0xffffffffu;
 // must not hide.
 const STEPS = 1024;
 const LOST = 0xfffffffeu;
-// FACES (voxels.rs puts them before this file, fcc's VOXEL_FACES): a voxel
+// FACES (voxels.rs puts them before this file, lattice's VOXEL_FACES): a voxel
 // is where n · (p − site) ≤ 1 for each, its neighbours at n.
 
 // `at` is where in the target, (0, 0) its top left, (1, 1) its bottom right.
@@ -188,7 +188,7 @@ fn voxel(level: u32, s: vec3i) -> u32 {
   return whole_or_none(site_in(slot, (s - levels[level].min) & vec3i(BRICK - 1)), s);
 }
 
-// How look `v` at site `s` shows, as fcc's whole_or_none: of pieces held in part (alpha under 255, red odd), whole where
+// How look `v` at site `s` shows, as lattice's whole_or_none: of pieces held in part (alpha under 255, red odd), whole where
 // its alpha is over a coin of the site, else nothing; so every look shows empty, whole or a medium.
 fn whole_or_none(v: u32, s: vec3i) -> u32 {
   let alpha = v >> 24u;
@@ -201,9 +201,9 @@ fn whole_or_none(v: u32, s: vec3i) -> u32 {
   return select(0u, v | 0xff000000u, alpha > (x ^ (x >> 12u)) >> 24u);
 }
 
-// Where site `r` of a brick is among its sites (Grid's order: z, y, then every other x).
+// Where site `r` of a brick is among its sites (Grid's order: z, y, then x).
 fn site_index(r: vec3i) -> u32 {
-  return u32(((r.z * BRICK + r.y) * BRICK + r.x) >> 1u);
+  return u32((r.z * BRICK + r.y) * BRICK + r.x);
 }
 
 // The look of the voxel at `r` in the brick at `slot`.
@@ -245,67 +245,47 @@ fn medium_colour(slot: i32, r: vec3i, v: u32) -> vec3f {
   return coloured(unpack4x8unorm(v).rgb, Light(vec3f(MEDIUM_SHADE), vec3f(0.0)));
 }
 
-// The site of the FCC lattice (x + y + z even) whose voxel holds `p`.
+// The site whose voxel, the cube [s, s + 1), holds `p`.
 fn site_at(p: vec3f) -> vec3i {
-  var r = round(p);
-  if ((i32(r.x) + i32(r.y) + i32(r.z)) & 1) != 0 {
-    let e = p - r;
-    let a = abs(e);
-    let k = select(select(2, 1, a.y >= a.z), 0, a.x >= a.y && a.x >= a.z);
-    r[k] += select(-1.0, 1.0, e[k] >= 0.0);
-  }
-  return vec3i(r);
+  return vec3i(floor(p));
 }
 
-// A ray along `d` as a rhombic dodecahedron's pairs of faces see it: per
-// pair, which way it crosses them and the inverse of how fast, for the
-// normals (1, 1, 0), (0, 1, 1), (1, 0, 1), then (1, −1, 0), (0, 1, −1),
-// (1, 0, −1). Along a pair it does neither (0, and 1e30).
+// A ray along `d`: the inverse of how fast it crosses each axis (1e30 along one).
 struct Ray {
-  ways: array<vec3f, 2>,
-  inverse: array<vec3f, 2>,
+  inverse: vec3f,
 }
 
 fn ray_of(d: vec3f) -> Ray {
-  let rates = array<vec3f, 2>(d.xyz + d.yzx, d.xyz - d.yzx);
-  var out: Ray;
-  for (var k = 0; k < 2; k++) {
-    out.ways[k] = select(sign(rates[k]), vec3f(0.0), abs(rates[k]) < vec3f(1e-9));
-    out.inverse[k] = select(1.0 / rates[k], vec3f(1e30), abs(rates[k]) < vec3f(1e-9));
-  }
-  return out;
+  return Ray(select(1.0 / d, vec3f(1e30), abs(d) < vec3f(1e-9)));
 }
 
-// Where `ray`, from `q` off the centre of a rhombic dodecahedron `r` times
-// a voxel (a voxel if 1, a cell of voxels.rs's CELLS if more), comes
-// between each pair of its faces and leaves it, per pair as Ray has them.
-// A pair it runs along it is between always, or never.
+// Where `ray`, from `q` off the least corner of a cube `r` a side (a voxel
+// if 1), crosses the planes of its faces, per axis: in, and out.
 struct Crossings {
-  enter: array<vec3f, 2>,
-  leave: array<vec3f, 2>,
+  enter: vec3f,
+  leave: vec3f,
 }
 
 fn crossings(ray: Ray, q: vec3f, r: f32) -> Crossings {
-  let at = array<vec3f, 2>(q.xyz + q.yzx, q.xyz - q.yzx);
-  var out: Crossings;
-  for (var k = 0; k < 2; k++) {
-    let along = ray.ways[k] == vec3f(0.0);
-    let never = select(vec3f(-1e30), vec3f(1e30), abs(at[k]) > vec3f(r));
-    out.enter[k] = select((-ray.ways[k] * r - at[k]) * ray.inverse[k], never, along);
-    out.leave[k] = select((ray.ways[k] * r - at[k]) * ray.inverse[k], vec3f(1e30), along);
-  }
-  return out;
+  let a = -q * ray.inverse;
+  let b = (vec3f(r) - q) * ray.inverse;
+  return Crossings(min(a, b), max(a, b));
 }
 
-// Where the ray enters the dodecahedron, and where it leaves it.
+// Where the ray enters the cube, and where it leaves it.
 fn entering(c: Crossings) -> f32 {
-  let m = max(c.enter[0], c.enter[1]);
-  return max(m.x, max(m.y, m.z));
+  return max(c.enter.x, max(c.enter.y, c.enter.z));
 }
 
 fn leaving(c: Crossings) -> f32 {
-  let m = min(c.leave[0], c.leave[1]);
-  return min(m.x, min(m.y, m.z));
+  return min(c.leave.x, min(c.leave.y, c.leave.z));
+}
+
+// The face (of FACES) a ray along `d` enters a cube by, its crossings `c`: of the axis it enters across last.
+fn entered(c: Crossings, d: vec3f) -> u32 {
+  let e = c.enter;
+  let axis = select(select(2u, 1u, e.y >= e.z), 0u, e.x >= e.y && e.x >= e.z);
+  return 2u * axis + select(1u, 0u, d[axis] > 0.0);
 }
 
 // What a ray met first: its level, site and voxel, how far (world units).
@@ -316,9 +296,6 @@ struct Hit {
   t: f32,
 }
 
-// A voxel's mean chord in its grid's units (worldgen's CHORD): a site's alpha
-// is what it stops of rays crossing it, along that.
-const CHORD = 0.9428090;
 // The mean of a voxel's faces' shades (face_shade): a medium's.
 const MEDIUM_SHADE = 0.7666667;
 // Less let through than this, and nothing behind shows.
@@ -338,7 +315,7 @@ fn medium_stops(slot: i32, r: vec3i, v: u32) -> vec3f {
 }
 // What a see-through voxel that stops `stops` of a ray crossing it lets through along `path` of its grid's units, each channel.
 fn lets_through(stops: vec3f, path: f32) -> vec3f {
-  return pow(1.0 - stops, vec3f(path / CHORD));
+  return pow(1.0 - stops, vec3f(path));
 }
 // Where the ray from `o` leaves the cell of scale `j` (voxels.rs's CELLS)
 // it is in at `mid`, if no voxel meets that cell: it meets none till then.
@@ -347,7 +324,7 @@ fn across(l: Level, j: u32, ray: Ray, o: vec3f, d: vec3f, mid: f32, held: ptr<fu
   if mid <= *held {
     return 0.0;
   }
-  let size = BRICK << (2u * j);
+  let size = BRICK << (2u * (j + 1u));
   let cell = site_at((o + d * mid - vec3f(l.min)) / f32(size) + vec3f(l.corner) * (f32(BRICK) / f32(size)));
   let out = leaving(crossings(ray, o - vec3f(l.min + cell * size - l.corner * BRICK), f32(size)));
   if !hollow(l, cell, j) {
@@ -421,19 +398,25 @@ fn march(d: vec3f) -> Hit {
           tint = medium_colour(slot, r, v);
         }
       }
+      // An empty brick: across it at once, as across a voxel, into the brick past the face it leaves by.
+      if slot == EMPTY {
+        let corner = l.min + brick * BRICK;
+        let c = crossings(ray, o - vec3f(corner), f32(BRICK));
+        let out = leaving(c);
+        if out > at {
+          at = min(out, stop);
+          let k = select(select(2, 1, c.leave.y <= c.leave.z), 0, c.leave.x <= c.leave.y && c.leave.x <= c.leave.z);
+          s = site_at(o + d * at);
+          s[k] = select(corner[k] - 1, corner[k] + BRICK, d[k] > 0.0);
+          continue;
+        }
+      }
       // Out across the nearest face it leaves by, into the neighbour there.
       let c = crossings(ray, o - vec3f(s), 1.0);
-      let plus = c.leave[0];
-      let minus = c.leave[1];
       let leave = leaving(c);
-      // The pair (k, k + 1 of x, y, z) it crosses, and whether by + or −.
-      let by_plus = min(plus.x, min(plus.y, plus.z)) <= min(minus.x, min(minus.y, minus.z));
-      let side = select(minus, plus, by_plus);
-      let k = select(select(2, 1, side.y <= side.z), 0, side.x <= side.y && side.x <= side.z);
-      let way = select(ray.ways[1], ray.ways[0], by_plus)[k];
+      let k = select(select(2, 1, c.leave.y <= c.leave.z), 0, c.leave.x <= c.leave.y && c.leave.x <= c.leave.z);
       var step = vec3i(0);
-      step[k] = i32(way);
-      step[(k + 1) % 3] = i32(select(-way, way, by_plus));
+      step[k] = i32(sign(d[k]));
       if any(medium != vec3f(0.0)) {
         // Its path through the voxel: from where it entered (or the eye) to where it leaves.
         let stops = 1.0 - lets_through(medium, leave - at);
@@ -554,15 +537,15 @@ fn face_look(hit: Hit, k: u32) -> u32 {
 }
 
 // What the voxel hit looks like along `d` (sRGB): the mean (linear) of its looks through the faces turned
-// most against `d`, alike (fcc's `facing`), wherever the ray enters it.
+// most against `d`, alike (lattice's `facing`), wherever the ray enters it.
 fn seen(hit: Hit, d: vec3f) -> vec3f {
   var least = 1e30;
-  for (var k = 0u; k < 12u; k++) {
+  for (var k = 0u; k < 6u; k++) {
     least = min(least, dot(FACES[k], d));
   }
   var sum = vec3f(0.0);
   var faces = 0.0;
-  for (var k = 0u; k < 12u; k++) {
+  for (var k = 0u; k < 6u; k++) {
     if dot(FACES[k], d) <= least + 1e-6 {
       sum += to_linear(unpack4x8unorm(face_look(hit, k)).rgb);
       faces += 1.0;
@@ -578,7 +561,7 @@ fn light_on(hit: Hit) -> Light {
   }
   var shade = 0.0;
   var open = 0.0;
-  for (var k = 0; k < 12; k++) {
+  for (var k = 0; k < 6; k++) {
     if (voxel(hit.level, hit.site + vec3i(FACES[k])) >> 24u) < 255u {
       shade += face_shade(FACES[k]);
       open += 1.0;
@@ -595,7 +578,7 @@ fn lit(hit: Hit) -> Light {
   }
   var sum = Light(vec3f(0.0), vec3f(0.0));
   var count = 0.0;
-  for (var k = 0; k < 12; k++) {
+  for (var k = 0; k < 6; k++) {
     let light = light_at(hit.level, hit.site + vec3i(FACES[k]));
     if any(light != vec2u(0u)) {
       sum.on += rgb9e5(light.x);
@@ -626,8 +609,13 @@ fn sample_fragment(in: Screen) -> Sample {
     meter(sky_light(d));
     return Sample(vec4u(0u, 0u, 0u, hit.level), vec4u(0u, medium, 0u));
   }
-  let look = seen(hit, d);
-  let light = light_on(hit);
+  // As the face it enters by looks, shaded by the way that face faces; lit, by its voxel's light.
+  let k = entered(crossings(ray_of(d), eye.xyz / exp2(f32(hit.level)) - vec3f(hit.site), 1.0), d);
+  let look = unpack4x8unorm(face_look(hit, k)).rgb;
+  var light = Light(vec3f(face_shade(FACES[k])), vec3f(0.0));
+  if globals.lit != 0u {
+    light = lit(hit);
+  }
   meter(sent(look, light));
   let colour = coloured(look, light);
   return Sample(vec4u(bitcast<vec3u>(hit.site), hit.level), vec4u(pack4x8unorm(vec4f(colour, 1.0)), medium, 0u));

@@ -2,9 +2,8 @@
 //! from its ground's top, so that each shows at every level as at level 0.
 //!
 //! A site holds only its share of a span thinner than the sites
-//! (worldgen's `cover`), and a line has a site every two spacings: rays
-//! down pass the site a thin layer is a sliver of to the one under it,
-//! and see what the layer lies on. So each layer is `thick`, what
+//! (worldgen's `cover`), and from the side shows the span that fills
+//! most of it: what a thin layer lies on. So each layer is `thick`, what
 //! `fill_below` fills aside, and from the side it hides what it lies on.
 //! A medium on the ground is as tall as it is. A heightfield's columns
 //! close its slopes' sides by reaching down past the columns around
@@ -16,7 +15,8 @@ use worldgen::sites::spacing;
 
 /**
  * A column's neighbours: along the axes, then the diagonals. A voxel shares
- * faces with sites of all eight columns, the diagonals' at its own height.
+ * faces with the columns along the axes, and edges with the diagonals',
+ * which rays at a slant pass between.
  */
 pub const AROUND: [(i64, i64); 8] = [(-1, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (-1, 1), (1, -1), (1, 1)];
 
@@ -163,9 +163,9 @@ mod tests {
     #[test]
     fn sides_close_any_heightfield() {
         // Ground as rough as any: each column's top at random, steps, corners and pits of every height. Light from the
-        // sky, along the lattice's directions up (a voxel's faces), reaches nothing two sites under the lowest top of
-        // the columns a site's voxel reaches into: not the hollow under the ground, past a cliff's corners or through a
-        // steep face. Nearer a cliff's face, the sky shows, as it would.
+        // sky, straight down or at 45° along an axis (light's directions up), reaches nothing two sites under the lowest
+        // top of the columns around: not the hollow under the ground, past a cliff's corners or through a steep face.
+        // Nearer a cliff's face, the sky shows, as it would.
         let top = |x: i64, z: i64| i64::from(worldgen::noise::hash(7, x, 0, z) % 40);
         let world = ground(Op::Fill, false, move |x, z| Column::new(top(x, z)).surface(0, 1).sides(0, lowest_around(top, x, z), 3));
         for level in 0..4 {
@@ -173,10 +173,13 @@ mod tests {
             let b = Box3 { min: [0, -48 / s, 0], max: [24, 48 / s, 24] };
             let grid = generate(&world, &b, level);
             for (x, z) in (2..22).flat_map(|x| (2..22).map(move |z| (x, z))) {
-                let lowest = (-1..=1).flat_map(|i| (-1..=1).map(move |j| top((x + i) * s, (z + j) * s))).min().expect("nine");
-                for y in (b.min[1]..(lowest - 2 * s).div_euclid(s)).filter(|&y| worldgen::grid::is_site(x, y, z)) {
-                    for n in fcc::ray::FACES.iter().filter(|n| n[1] > 0) {
-                        let (p, d) = ([x, y, z].map(|v| v as f64), n.map(|v| v as f64 / std::f64::consts::SQRT_2));
+                // Each column read where the level reads it.
+                let read = |v: i64| v * s + worldgen::sites::middle(s);
+                let lowest = (-1..=1).flat_map(|i| (-1..=1).map(move |j| top(read(x + i), read(z + j)))).min().expect("nine");
+                for y in b.min[1]..(lowest - 2 * s).div_euclid(s) {
+                    for n in [[0, 1, 0], [1, 1, 0], [-1, 1, 0], [0, 1, 1], [0, 1, -1]] {
+                        let length = ((n[0] * n[0] + n[1] * n[1] + n[2] * n[2]) as f64).sqrt();
+                        let (p, d) = ([x, y, z].map(|v| v as f64 + 0.5), n.map(|v| v as f64 / length));
                         let exits = |i: usize| match d[i] {
                             v if v > 0.0 => (b.max[i] as f64 - p[i]) / v,
                             v if v < 0.0 => (b.min[i] as f64 - p[i]) / v,
@@ -186,7 +189,7 @@ mod tests {
                         if exits(1) > exits(0).min(exits(2)) {
                             continue;
                         }
-                        let through = 1.0 - composited(&grid, p, d, exits(1), 1.0).iter().map(|(_, seen)| seen.stopped).sum::<f64>();
+                        let through = 1.0 - composited(&grid, p, d, exits(1)).iter().map(|(_, seen)| seen.stopped).sum::<f64>();
                         assert!(
                             through < 0.01,
                             "level {level}: {through} of the sky reaches ({x}, {y}, {z}), under the ground, along {n:?}"
@@ -223,7 +226,7 @@ mod tests {
             let mut sum = [0.0; 3];
             for i in 0..4096 {
                 let at = |n: u64| 8.0 + 48.0 * worldgen::noise::hash(n, i, 0, 0) as f64 / u32::MAX as f64;
-                for (_, seen) in composited(&grid, [at(1), 40.0 / s + 5.0, at(2)], [0.0, -1.0, 0.0], 40.0 / s + 10.0, 1.0) {
+                for (_, seen) in composited(&grid, [at(1), 40.0 / s + 5.0, at(2)], [0.0, -1.0, 0.0], 40.0 / s + 10.0) {
                     (0..3).for_each(|c| sum[c] += seen.shown[c] / 4096.0);
                 }
             }
@@ -242,11 +245,11 @@ mod tests {
 
     /** Of what rays straight down `grid`'s middle see, the share that is the dark kind's red (#40), not stone's (#80). */
     fn dark_from_above(grid: &VoxelGrid) -> f64 {
-        let red = |v: f64| fcc::light::srgb_to_linear((v / 255.0) as f32) as f64;
+        let red = |v: f64| lattice::light::srgb_to_linear((v / 255.0) as f32) as f64;
         let (top, depth) = (grid.clip().max[1] as f64 - 1.0, (grid.clip().max[1] - grid.clip().min[1]) as f64);
         let rays = (0..4096).map(|i| {
             let at = |n: u64| 8.0 + 48.0 * worldgen::noise::hash(n, i, 0, 0) as f64 / u32::MAX as f64;
-            let seen = composited(grid, [at(1), top, at(2)], [0.0, -1.0, 0.0], depth, 1.0);
+            let seen = composited(grid, [at(1), top, at(2)], [0.0, -1.0, 0.0], depth);
             let (stopped, r) = seen.iter().fold((0.0, 0.0), |(s, r), (_, seen)| (s + seen.stopped, r + seen.shown[0]));
             (red(128.0) - r / stopped) / (red(128.0) - red(64.0))
         });

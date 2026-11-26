@@ -1,8 +1,8 @@
-//! The chunks engine: the renderer picks the cells of the
-//! lattice in view (renderer.rs), on a thread of its own, worker threads
-//! bake them into chunks (bakery.rs), their whole voxels reliefs,
-//! and the compositor draws them (compositor.rs).
-//! See docs/architecture.md, sections 1 to 5.
+//! The flat engine: the renderer picks the cells of the octree in view
+//! along each face (renderer.rs), on a thread of its own, worker threads
+//! bake them into chunks (bakery.rs), a picture each, and the compositor
+//! draws them (compositor.rs).
+//! See docs/architecture.md, sections 1 to 4.
 
 mod bakery;
 mod compositor;
@@ -13,7 +13,7 @@ use std::sync::{Arc, Condvar, Mutex};
 
 use bake::lod::Lod;
 use egui_wgpu::wgpu;
-use fcc::GRID_LEVELS;
+use lattice::GRID_LEVELS;
 
 use compositor::{Compositor, View};
 use renderer::Renderer;
@@ -54,8 +54,8 @@ pub struct Chunks {
 }
 
 impl Chunks {
-    /** Draws `world`, its whole voxels reliefs, flat if `flat`. */
-    pub fn new(world: &World, flat: bool) -> Chunks {
+    /** Draws `world`. */
+    pub fn new(world: &World) -> Chunks {
         let shared: Shared = Arc::default();
         let baked = {
             let shared = shared.clone();
@@ -64,7 +64,7 @@ impl Chunks {
                 shared.1.notify_all();
             }
         };
-        let renderer = Renderer::new(world, flat, baked);
+        let renderer = Renderer::new(world, baked);
         let mailbox = shared.clone();
         std::thread::spawn(move || render_on(renderer, &mailbox));
         Chunks { shared, asked: None, busy: false, published: 0 }
@@ -217,11 +217,11 @@ mod tests {
 
     /**
      * World `name` of seed 1 from its spawn, looking `look`, at `detail`,
-     * once the view is complete, in relief.
+     * once the view is complete.
      */
     fn complete_view(name: &str, look: [f64; 2], detail: f64) -> Composed {
         let (mut world, look) = world_and_look(name, look, detail);
-        complete(&mut Chunks::new(&world, false), &mut world, &look)
+        complete(&mut Chunks::new(&world), &mut world, &look)
     }
 
     /** World `name` of seed 1, and the look from its spawn, looking `look`, at `detail`. */
@@ -251,11 +251,22 @@ mod tests {
         format!("{count} pixels differ, by {most} at most, the first {first:?}")
     }
 
+    /**
+     * Whether two pictures of PIXELS differ, by more than a level or two, in
+     * a few pixels only: where neighbours' pictures overlap at a depth, the
+     * one drawn last shows, and the order chunks are drawn in falls as they
+     * came, so that the same view drawn twice differs in a pixel in fifty.
+     */
+    fn few_differ(a: &[u8], b: &[u8]) -> bool {
+        let differing = a.chunks(4).zip(b.chunks(4)).filter(|(a, b)| a.iter().zip(*b).any(|(a, b)| a.abs_diff(*b) > 2)).count();
+        differing * 20 < (PIXELS[0] * PIXELS[1]) as usize
+    }
+
     #[test]
     fn moving_keeps_most_chunks() {
         let make = worlds::by_name("moor").expect("moor").make;
         let mut world = World::new(make(1), None, 4);
-        let mut chunks = Chunks::new(&world, false);
+        let mut chunks = Chunks::new(&world);
         let look = Look::new(make(1).spawn.map(|v| v as f64), [30.0, -10.0], 90.0, 400.0, [320.0, 200.0]);
         let ids = |c: &Composed| c.frame.chunks.iter().map(|p| p.chunk.id).collect::<HashSet<_>>();
         let before = ids(&complete(&mut chunks, &mut world, &look));
@@ -276,9 +287,7 @@ mod tests {
         let look = Look::new(make(1).spawn.map(|v| v as f64), [30.0, -10.0], 90.0, 400.0, [320.0, 200.0]);
         let forward = view_basis(look.yaw, look.pitch)[2];
         let moved = Look { camera: std::array::from_fn(|i| look.camera[i] + forward[i] * 7.0), ..look };
-        // Not flat: following changes lays the clusters out in another order than taking the frame whole, and ties
-        // fall by it (docs/todo.md).
-        let mut chunks = Chunks::new(&world, false);
+        let mut chunks = Chunks::new(&world);
         let first = complete(&mut chunks, &mut world, &look);
         let second = complete(&mut chunks, &mut world, &moved);
         assert!(second.frame.since(first.frame.number).is_some(), "the changes since the first frame kept");
@@ -286,10 +295,9 @@ mod tests {
         easel.pixels(&first, PIXELS);
         let followed = easel.pixels(&second, PIXELS).2;
         let whole = Easel::offscreen(None).pixels(&second, PIXELS).2;
-        // Neighbours' pictures of medium lie over one another along their edges, in the clusters' order:
-        // where their colours differ, it shows by a level or two (docs/todo.md).
-        let most = followed.iter().zip(&whole).map(|(a, b)| a.abs_diff(*b)).max();
-        assert!(most <= Some(2), "{}", differ(&followed, &whole));
+        // Following changes lays the clusters out in another order than taking the frame whole, and where
+        // neighbours' pictures overlap at a depth, the one drawn last shows (docs/todo.md).
+        assert!(few_differ(&followed, &whole), "{}", differ(&followed, &whole));
     }
 
     /**
@@ -298,15 +306,15 @@ mod tests {
      */
     fn culling_leaves_the_picture_unchanged(name: &str, angles: [f64; 2], octaves: f64) {
         let (mut world, look) = world_and_look(name, angles, 2f64.powf(octaves));
-        for flat in [false, true] {
-            let composed = complete(&mut Chunks::new(&world, flat), &mut world, &look);
+        {
+            let composed = complete(&mut Chunks::new(&world), &mut world, &look);
             let [culled, all] = [true, false].map(|culls| {
                 let mut easel = Easel::offscreen(None);
                 easel.painter = Some(Box::new(Compositor::new(&easel.device, easel.format, culls)));
                 let pixels = easel.pixels(&composed, PIXELS).2;
                 (pixels, easel.held::<Compositor>().expect("a compositor").drawn(&easel).iter().sum::<u32>())
             });
-            let drew = if flat { "flat tiles" } else { "tiles" };
+            let drew = "runs";
             assert!(culled.0 == all.0, "{name} {angles:?} {drew}: {}", differ(&culled.0, &all.0));
             assert!(culled.1 < all.1, "{name} {angles:?}: culling drew {} {drew} of {}", culled.1, all.1);
         }
@@ -315,9 +323,9 @@ mod tests {
     /**
      * Hiding cells on the CPU (renderer.rs's Hiding) draws fewer chunks of
      * the forest from its spawn, and once all its probes asked for is drawn
-     * (drawn_complete), leaves it unchanged in relief, there and moved on
-     * within its pick. (Flat, a pixel or two falls by the order of their
-     * chunks, hiding or not.)
+     * (drawn_complete), leaves it nearly unchanged, there and moved on
+     * within its pick: but pixels here and there, which fall by the order
+     * of their chunks.
      */
     #[test]
     #[ignore = "draws on the GPU: needs Vulkan, as Mesa's software one"]
@@ -330,7 +338,7 @@ mod tests {
         let [hidden, all] = [true, false].map(|hides| {
             let (mut world, look) = world_and_look("forest", [0.0, 0.0], 2f64.powf(3.25));
             let look = Look { hides, ..look };
-            let (mut chunks, mut easel) = (Chunks::new(&world, false), Easel::offscreen(None));
+            let (mut chunks, mut easel) = (Chunks::new(&world), Easel::offscreen(None));
             let mut drawn = |look: &Look| {
                 let frame = crate::drawn_complete(&mut chunks, &mut world, look, &mut easel);
                 let pixels = easel.pixels(&*frame.picture, PIXELS).2;
@@ -342,14 +350,13 @@ mod tests {
         });
         for (moved, (hidden, all)) in hidden.iter().zip(&all).enumerate() {
             assert!(hidden.1 < all.1, "moved {moved}: {} chunks of {}", hidden.1, all.1);
-            // The sky's fog follows the farthest chunk (Frame's `farthest`), which may be hidden; and pictures of
-            // medium lie over one another in their chunks' order, as below.
-            let most = hidden.0.iter().zip(&all.0).map(|(a, b)| a.abs_diff(*b)).max().unwrap_or(0);
-            assert!(most <= 2, "moved {moved}: {}", differ(&hidden.0, &all.0));
+            // The sky's fog follows the farthest chunk (Frame's `farthest`), which may be hidden; and pictures fall
+            // by their chunks' order, as above.
+            assert!(few_differ(&hidden.0, &all.0), "moved {moved}: {}", differ(&hidden.0, &all.0));
         }
     }
 
-    /** The thickest cells too: in relief, their columns move most with the camera. */
+    /** Turned and from afar too. */
     mod culling_on_the_gpu_leaves_the_picture_unchanged {
         use super::culling_leaves_the_picture_unchanged as unchanged;
 

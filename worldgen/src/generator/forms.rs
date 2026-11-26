@@ -196,26 +196,15 @@ fn alone(node: &Node, key: &str, layer: &'static str, bounds: Box3, f: i64, seed
 }
 
 /**
- * The pairs of neighbouring columns along an axis that meet an n[0] × n[1]
- * box of them from (0, 0), to `pair`. Seen along an axis, a voxel is a
- * square turned 45° round its column (|u| + |v| ≤ 1, columns 1 apart),
- * twice a column's area: the voxels of the columns whose u + v is even
- * cover the plane once, those of the odd ones once more. So a ray along an
- * axis meets the voxels of two neighbouring columns, one of each, and half
- * a column's area of rays those of each pair: what a thing hides along the
- * axis is half a column's area for each pair either of which holds one of
- * its sites. Counted by columns, a sheet one site thick hid half what it
- * does, and a lone voxel half its shadow.
+ * The columns along an axis of an n[0] × n[1] box of them from (0, 0), to
+ * `column`. Seen along an axis, a voxel is a square, its column's: a ray
+ * along the axis meets the voxels of one column, and what a thing hides
+ * along it is a column's area for each column that holds one of its sites.
  */
-fn pairs(n: [i64; 2], mut pair: impl FnMut([i64; 2], [i64; 2])) {
-    for i in -1..n[0] {
-        for j in 0..n[1] {
-            pair([i, j], [i + 1, j]);
-        }
-    }
+fn columns(n: [i64; 2], mut column: impl FnMut([i64; 2])) {
     for i in 0..n[0] {
-        for j in -1..n[1] {
-            pair([i, j], [i, j + 1]);
+        for j in 0..n[1] {
+            column([i, j]);
         }
     }
 }
@@ -244,20 +233,14 @@ impl Columns {
         self.held[(p[0] * self.n[1] + p[1]) as usize] = true;
     }
 
-    /**
-     * Those `plane` holds too (a box as large); returns how many more pairs
-     * (`pairs`) it holds: each column is in four, so one newly held adds
-     * those whose other column isn't.
-     */
+    /** Those `plane` holds too (a box as large); returns how many more columns it holds. */
     fn add(&mut self, plane: &Columns) -> u32 {
         let mut added = 0;
         for i in 0..self.held.len() {
-            if !plane.held[i] || self.held[i] {
-                continue;
+            if plane.held[i] && !self.held[i] {
+                self.held[i] = true;
+                added += 1;
             }
-            self.held[i] = true;
-            let p = [i as i64 / self.n[1], i as i64 % self.n[1]];
-            added += [[-1, 0], [1, 0], [0, -1], [0, 1]].iter().filter(|d| !self.holds([p[0] + d[0], p[1] + d[1]])).count() as u32;
         }
         added
     }
@@ -279,16 +262,14 @@ impl Columns {
         Columns { n: [height, held.len() as i64 / height.max(1)], held }
     }
 
-    /** How many pairs of neighbouring columns (`pairs`) meeting the box either of which holds a site. */
-    fn pairs_held(&self) -> u32 {
-        let mut count = 0;
-        pairs(self.n, |p, q| count += u32::from(self.holds(p) || self.holds(q)));
-        count
+    /** How many columns hold a site. */
+    fn held(&self) -> u32 {
+        self.held.iter().filter(|&&h| h).count() as u32
     }
 
-    /** What the sites on them hide along the axis, in columns' areas (`pairs`). */
+    /** What the sites on them hide along the axis, in columns' areas (`columns`). */
     fn shadow(&self) -> f64 {
-        self.pairs_held() as f64 / 2.0
+        self.held() as f64
     }
 }
 
@@ -320,7 +301,7 @@ struct Thing {
     min: [i64; 3],
     layers: Vec<Slice>,
     /**
-     * By k, the pairs (`pairs`) its layers before the kth hold seen across
+     * By k, the columns its layers before the kth hold seen across
      * the axis, and those from it on: what any slab adds, read off them.
      */
     before: Vec<u32>,
@@ -434,8 +415,8 @@ impl Shadows {
             if lo >= hi {
                 continue;
             }
-            // What it adds seen from each side, of pairs: half a column's area each.
-            let adds = (after[lo] - after[hi] + before[hi] - before[lo]) as f64 / 4.0;
+            // What it adds seen from each side, of columns, the mean of the two.
+            let adds = (after[lo] - after[hi] + before[hi] - before[lo]) as f64 / 2.0;
             // Along each of the other two, the slab's layers stacked: a plane of the axis and the third.
             let along: f64 = (0..2).map(|k| Columns::stacked(layers[lo..hi].iter().map(|s| &s.along[k])).shadow()).sum();
             sum += of(adds, along) * (f * f) as f64;
@@ -467,16 +448,15 @@ impl Shadows {
         };
         let mut areas = std::collections::BTreeMap::<[i64; 3], f64>::new();
         for Thing { min, layers, .. } in &self.things {
-            // Half a column's area at the middle of each pair of neighbouring columns holding a site (`pairs`), its
-            // place in halves of the sites' spacing.
+            // A column's area at the middle of each column holding a site, its place in halves of the sites' spacing.
             let plane = Columns::union(layers.iter().map(|s| &s.across));
-            pairs(plane.n, |p, q| {
-                if plane.holds(p) || plane.holds(q) {
-                    for (oa, wa) in cells((p[0] + q[0] + 2 * min[a]) * f) {
-                        for (ob, wb) in cells((p[1] + q[1] + 2 * min[b]) * f) {
+            columns(plane.n, |p| {
+                if plane.holds(p) {
+                    for (oa, wa) in cells((2 * (p[0] + min[a]) + 1) * f) {
+                        for (ob, wb) in cells((2 * (p[1] + min[b]) + 1) * f) {
                             let mut offset = [0; 3];
                             (offset[a], offset[b]) = (oa, ob);
-                            *areas.entry(offset).or_insert(0.0) += wa * wb * (f * f) as f64 / 2.0;
+                            *areas.entry(offset).or_insert(0.0) += wa * wb * (f * f) as f64;
                         }
                     }
                 }
@@ -487,38 +467,9 @@ impl Shadows {
     }
 }
 
-/**
- * How many pairs of neighbouring columns along each axis (`pairs`) of the
- * sites `r` times finer than a cell hold one of them in the cell, either
- * of the two: by halves of a column's area, about the 2 r² columns' area
- * of its shadow (a cell's are 2 r² wide), and unevenly by axis, as
- * nearest_site breaks ties one way. Cells of a level are congruent, ties
- * and all (they differ by an even number of cells along the axes), so the
- * count depends on r only.
- */
-pub(super) fn pairs_of_cell(r: i64) -> [u32; 3] {
-    static PAIRS: [OnceLock<[u32; 3]>; 64] = [const { OnceLock::new() }; 64];
-    *PAIRS[r.trailing_zeros() as usize].get_or_init(|| {
-        std::array::from_fn(|axis| {
-            let (a, b) = ((axis + 1) % 3, (axis + 2) % 3);
-            // The columns from (−r, −r), as the cell reaches r along the axes.
-            let mut cell = Columns::new([2 * r + 1; 2]);
-            for [i, j] in (-r..=r).flat_map(|i| (-r..=r).map(move |j| [i, j])) {
-                // The cell is symmetric about its centre's plane across the column, and where a column runs
-                // in one of its faces, ties go one way all along it: if the column has a site in the cell,
-                // it has one within 2 of that plane (checked by a_cells_pairs_of_columns_are_counted).
-                let holds = (-2..=2i64).filter(|k| (i + j + k) & 1 == 0).any(|k| {
-                    let mut p = [0; 3];
-                    (p[axis], p[a], p[b]) = (k, i, j);
-                    nearest_site(p.map(|v| v * ONE), r) == [0; 3]
-                });
-                if holds {
-                    cell.set([i + r, j + r]);
-                }
-            }
-            cell.pairs_held()
-        })
-    })
+/** How many columns along each axis of the sites `r` times finer than a cell hold one of them in the cell: all r². */
+pub(super) fn columns_of_cell(r: i64) -> [u32; 3] {
+    [(r * r) as u32; 3]
 }
 
 /**
@@ -526,10 +477,10 @@ pub(super) fn pairs_of_cell(r: i64) -> [u32; 3] {
  * drawn whole two levels finer (spacing f), or at the coarsest level it
  * is drawn at (at most `detail`) if that is coarser, then coarsened.
  * A coarse site stands for the fine sites in its cell (those nearest
- * it). A ray crossing the cell along an axis meets the voxels of two
- * neighbouring columns (`pairs`): it is stopped as often as the pairs that
- * hold a fine site of the cell hold one of the thing, on average over the
- * axes: its share, with which it is drawn.
+ * it). A ray crossing the cell along an axis meets the voxels of one
+ * column (`columns`): it is stopped as often as the columns of the cell
+ * hold one of the thing, on average over the axes: its share, with which
+ * it is drawn.
  * Each of its faces is of a kind of what rays through it see: along the
  * face's normal, a line of nearest neighbours, each such column's first
  * fine site from the face's end is credited to that face of every cell
@@ -554,11 +505,11 @@ pub(super) fn measure(
     cost::add(layer, Work { measured: own.cells.len() as u64, ..Work::default() });
     // Kinds counted, each with how it meets the world.
     type Counts = Vec<(Kind, Op, u32)>;
-    // By coarse site: per axis, how many pairs of neighbouring columns hold a fine site of it; per face, what rays
+    // By coarse site: per axis, how many columns hold a fine site of it; per face, what rays
     // through it see first of all, counted by kind.
     #[derive(Default)]
     struct Stats {
-        pairs: [u32; 3],
+        columns: [u32; 3],
         seen: [Counts; FACE_KINDS],
     }
     let count = |kinds: &mut Counts, kind: Kind, op: Op| match kinds.iter_mut().find(|e| e.0 == kind) {
@@ -580,18 +531,17 @@ pub(super) fn measure(
         [i % m[0] + lo[0], i / m[0] % m[1] + lo[1], i / (m[0] * m[1]) + lo[2]]
     };
     let mut cells: Vec<Stats> = (0..m[0] * m[1] * m[2]).map(|_| Stats::default()).collect();
-    // Fine points by their index in `own` (x first): steps along each axis, and the cell of each fine site
-    // (x + y + z even), found once for all the passes.
+    // Fine points by their index in `own` (x first): steps along each axis, and the cell of each fine site,
+    // found once for all the passes.
     let stride = [1, n[0], n[0] * n[1]];
     // What the thing has at each fine point, found once for all the passes.
     let has: Vec<Option<(Kind, Op)>> = (0..own.cells.len()).map(|p| own.of(p)).collect();
-    let parity = own.b.min.iter().sum::<i64>();
     let units: [Vec<Fixed>; 3] = std::array::from_fn(|c| (0..n[c]).map(|v| scaled(c, v)).collect());
     let mut cell_at = vec![u32::MAX; own.cells.len()];
     for z in 0..n[2] {
         for y in 0..n[1] {
             let row = (y * stride[1] + z * stride[2]) as usize;
-            for x in ((y + z + parity) & 1..n[0]).step_by(2) {
+            for x in 0..n[0] {
                 let v = [units[0][x as usize], units[1][y as usize], units[2][z as usize]];
                 cell_at[row + x as usize] = index(nearest_unit_site(v)) as u32;
             }
@@ -619,25 +569,25 @@ pub(super) fn measure(
             let column = (i * n[b] + j) as usize;
             if (0..n[a]).contains(&i) && (0..n[b]).contains(&j) { &held[ends[column]..ends[column + 1]] } else { &[] }
         };
-        pairs([n[a], n[b]], |p, q| {
-            let (p, q) = (at(p), at(q));
-            for &c in p.iter().chain(q.iter().filter(|c| !p.contains(c))) {
-                cells[c as usize].pairs[axis] += 1;
+        columns([n[a], n[b]], |p| {
+            for &c in at(p) {
+                cells[c as usize].columns[axis] += 1;
             }
         });
     }
-    // Each pair counted against those holding one of the cell's fine sites at all.
-    let all = pairs_of_cell(s / f);
+    // Each column counted against those holding one of the cell's fine sites at all.
+    let all = columns_of_cell(s / f);
     let picks = hash_text(&format!("{key}#measured"), seed);
-    // Its share is the mean over the axes of the share of pairs: of `whole`, exact.
+    // Its share is the mean over the axes of the share of columns: of `whole`, exact.
     let whole = 3 * all.iter().map(|&a| a as u128).product::<u128>();
-    let shares: Vec<u128> = cells.iter().map(|stats| (0..3).map(|i| stats.pairs[i] as u128 * (whole / 3 / all[i] as u128)).sum()).collect();
+    let shares: Vec<u128> =
+        cells.iter().map(|stats| (0..3).map(|i| stats.columns[i] as u128 * (whole / 3 / all[i] as u128)).sum()).collect();
     // Columns along each line of nearest neighbours d, from its start on the side of −d to its end on the side of
     // d: rays coming from either end see the faces towards it.
     let mut crossed: Vec<usize> = Vec::new();
     for (from_end, d) in VOXEL_FACES.iter().enumerate().filter(|(_, d)| d.iter().find(|v| **v != 0) == Some(&-1)) {
         let d = d.map(i64::from);
-        let from_start = fcc::opposite(from_end);
+        let from_start = lattice::opposite(from_end);
         let step: i64 = (0..3).map(|c| d[c] * stride[c]).sum();
         // Columns of sites start where a step back leaves the box: on its side of −d along an axis d moves on.
         let edge = |c: usize, v: i64| d[c] != 0 && v == if d[c] < 0 { n[c] - 1 } else { 0 };
@@ -652,7 +602,7 @@ pub(super) fn measure(
             } else {
                 0..0
             };
-            for z in zs.filter(|z| (x + y + z + parity) & 1 == 0) {
+            for z in zs {
                 let start = [x, y, z];
                 let origin = x + y * stride[1] + z * stride[2];
                 let length =
@@ -735,7 +685,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn columns_added_count_the_pairs_their_union_holds() {
+    fn columns_added_count_the_columns_their_union_holds() {
         // Shadows reads slabs off running counts, not unions counted anew.
         let mut random = Rng::new(7);
         let mut seen = Columns::new([9, 13]);
@@ -744,7 +694,7 @@ mod tests {
             let mut plane = Columns::new([9, 13]);
             plane.held.iter_mut().for_each(|h| *h = random.below(5) == 0);
             count += seen.add(&plane);
-            assert_eq!(count, seen.pairs_held());
+            assert_eq!(count, seen.held());
         }
     }
 }

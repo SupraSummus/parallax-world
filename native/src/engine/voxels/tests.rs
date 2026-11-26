@@ -9,9 +9,9 @@ use super::*;
  */
 fn forest_tiles(eye: Vec3) -> Arc<Level> {
     let mut world = World::new((worlds::by_name("forest").expect("forest").make)(1), None, 4);
-    let reach = std::array::from_fn(|l| (l == 0).then_some(fcc::GRID_REACH));
-    // All around the eye asked for.
-    let asked = Arc::new(world.lacking(0, fcc::GRID_REACH, eye).into_iter().map(|id| (0, Piece::Tile(id))).collect());
+    // All around the eye asked for, as far as a window's ball reads.
+    let reach = std::array::from_fn(|l| (l == 0).then_some(READ));
+    let asked = Arc::new(world.lacking(0, READ, eye).into_iter().map(|id| (0, Piece::Tile(id))).collect());
     let wants = Wants { reach, lit: Lit::Not, asked };
     loop {
         world.update(eye, &wants);
@@ -20,14 +20,15 @@ fn forest_tiles(eye: Vec3) -> Arc<Level> {
         }
         world.wait();
     }
-    let faced = |id: TileId, tile: &Tile| {
+    let faced = |tile: &Tile| {
         let g = &tile.grid;
         let firsts = (0..g.cells.len() / BRICK_SITES).step_by(64);
         let sites = firsts.filter_map(|first| sites(first).find(|&i| g.cells[i] != 0));
-        let views = sites.flat_map(|i| std::iter::once(i as u32).chain((0..fcc::FACE_KINDS as u32).map(move |k| g.cells[i] + k))).collect();
-        Tile::new(id, Arc::new(fcc::Grid { views, ..(**g).clone() }))
+        let views =
+            sites.flat_map(|i| std::iter::once(i as u32).chain((0..lattice::FACE_KINDS as u32).map(move |k| g.cells[i] + k))).collect();
+        Tile::new(Arc::new(lattice::Grid { views, ..(**g).clone() }))
     };
-    Arc::new(Level::new(world.level(0).tiles.iter().map(|(id, tile)| (id, Arc::new(faced(id, tile))))))
+    Arc::new(Level::new(world.level(0).tiles.iter().map(|(id, tile)| (id, Arc::new(faced(tile))))))
 }
 
 #[test]
@@ -37,10 +38,10 @@ fn a_site_s_faces_see_their_looks_till_more_than_sights_differ() {
         let (sights, _, which) = sights(own, views);
         (0..views.len()).map(|k| which >> (2 * k) & 3).map(|at| if at == 0 { own } else { sights[at as usize - 1] }).collect()
     };
-    let few = [7, 5, 5, 7, 9, 9, 5, 7, 7, 11, 7, 5];
+    let few = [7, 5, 5, 9, 11, 7];
     assert_eq!(seen(7, &few), few);
-    let many: Vec<u32> = (10..22).collect();
-    assert_eq!(seen(7, &many), [10, 11, 12, 7, 7, 7, 7, 7, 7, 7, 7, 7]);
+    let many: Vec<u32> = (10..16).collect();
+    assert_eq!(seen(7, &many), [10, 11, 12, 7, 7, 7]);
 }
 
 /** Where the forest's windows are looked at from. */
@@ -91,25 +92,18 @@ fn settle(windows: &mut Windows, tiles: &Arc<Level>, eye: Vec3, slots: &mut Hash
 
 /**
  * What level 0's window holds, per entry of its ball: EMPTY, UNKNOWN or
- * its slots' words, as `slots` say they were uploaded, and the cells it
- * counts in; the slots it takes; and its counts, as its entries say.
+ * its slots' words, as `slots` say they were uploaded, and whether it
+ * counts in its cells; the slots it takes; and its counts, as its entries say.
  */
-type Holds = (Vec<Option<(Result<Vec<u32>, i32>, [u32; SCALES])>>, usize, Vec<u32>);
+type Holds = (Vec<Option<(Result<Vec<u32>, i32>, bool)>>, usize, Vec<u32>);
 
 fn holds(windows: &Windows, slots: &HashMap<u32, Vec<u32>>) -> Holds {
     let w = &windows.windows[0];
     let (mut counts, mut rows) = (vec![0u32; COUNTS], [[0; WINDOW as usize]; 3]);
     for b in window_bricks(w.ball.map_or([WINDOW / 2; 3], |ball| ball.middle)) {
-        if w.ball.is_some_and(|ball| ball.contains(b)) && w.meets[entry(b)] != [0; SCALES] {
+        if w.counted[entry(b)] {
             (0..3).for_each(|d| rows[d][b[d].rem_euclid(WINDOW) as usize] += 1);
-        }
-        for j in 0..SCALES {
-            for e in (0..27).filter(|e| w.meets[entry(b)][j] >> e & 1 != 0) {
-                let cell = around(b, j, e);
-                if (cell[0] + cell[1] + cell[2]) & 1 == 0 {
-                    counts[cell_entry(cell, j)] += 1;
-                }
-            }
+            (0..SCALES).for_each(|j| counts[cell_entry(cell_of(b, j), j)] += 1);
         }
     }
     assert!(w.counts == counts && w.rows == rows, "counts and rows as the entries say");
@@ -125,7 +119,7 @@ fn holds(windows: &Windows, slots: &HashMap<u32, Vec<u32>>) -> Holds {
     let mut held = vec![None; TABLE];
     for b in w.ball.map(|ball| in_ball(ball.bounds(), ball, None)).into_iter().flatten() {
         let e = w.table[entry(b)];
-        held[entry(b)] = Some((if e >= 0 { Ok(words(e)) } else { Err(e) }, w.meets[entry(b)]));
+        held[entry(b)] = Some((if e >= 0 { Ok(words(e)) } else { Err(e) }, w.counted[entry(b)]));
     }
     (held, w.slots, counts)
 }
@@ -258,7 +252,7 @@ fn a_window_holds_the_bricks_of_every_tile_made_past_the_heights_too() {
     // Over the forest's heights, where its tiles are made empty (world.rs): each brick of a tile made is held,
     // as empty or with voxels, not unknown, so rays read on through it, not the next level. Those over
     // the heights are empty.
-    let tall = World::new((worlds::by_name("forest").expect("forest").make)(1), None, 1).heights[0].1 as f64;
+    let tall = (worlds::by_name("forest").expect("forest").make)(1).heights_at(0).1 as f64;
     let eye = [10.0, tall + 100.0, -20.0];
     let tiles = forest_tiles(eye);
     let mut windows = Windows::new(1 << 20, false);
@@ -300,8 +294,8 @@ fn the_window_and_the_tiles_wanted_hold_all_a_ray_reads_of_what_it_meets() {
             let read = reach_of(ball.about(eye_brick(0, eye, [0; 3])));
             for way in ways.clone() {
                 let length = way.iter().map(|v| v * v).sum::<f64>().sqrt();
-                let site = fcc::ray::nearest_site(std::array::from_fn(|d| eye[d] + way[d] / length * read));
-                for s in std::iter::once([0; 3]).chain(fcc::VOXEL_FACES).map(|n| std::array::from_fn(|d| site[d] as i32 + n[d])) {
+                let site = lattice::ray::nearest_site(std::array::from_fn(|d| eye[d] + way[d] / length * read));
+                for s in std::iter::once([0; 3]).chain(lattice::VOXEL_FACES).map(|n| std::array::from_fn(|d| site[d] as i32 + n[d])) {
                     let b = s.map(|v: i32| v.div_euclid(BRICK));
                     assert!(ball.contains(b), "eye {eye:?}: site {s:?} out of {ball:?}");
                     assert!(tiles.contains(&s.map(|v| v.div_euclid(TILE as i32))), "eye {eye:?}: site {s:?} in no tile wanted");
@@ -312,7 +306,7 @@ fn the_window_and_the_tiles_wanted_hold_all_a_ray_reads_of_what_it_meets() {
 }
 
 #[test]
-fn no_voxel_the_window_holds_is_out_of_its_box_or_meets_a_cell_counted_hollow() {
+fn no_voxel_the_window_holds_is_out_of_its_box_or_in_a_cell_counted_hollow() {
     let eye = EYE;
     let tiles = FOREST.clone();
     // Moved, so that bricks of both sides of the torus have been in it.
@@ -323,27 +317,20 @@ fn no_voxel_the_window_holds_is_out_of_its_box_or_meets_a_cell_counted_hollow() 
     let (ball, origin, (low, high)) = (window.ball.expect("a ball"), window.origin, window.bounds());
     let (lo, hi) = ball.bounds();
     let (lo, hi) = (lo.map(|v| v * BRICK), hi.map(|v| v * BRICK));
-    // Every voxel of the ball, and every cell of each scale it meets, at the ball's edge too.
+    // Every voxel of the ball, and the cell of each scale it is in, at the ball's edge too.
     let mut voxels = 0;
     for z in lo[2]..hi[2] {
         for y in lo[1]..hi[1] {
-            for x in (lo[0] + (lo[0] + y + z + origin.iter().sum::<i32>()).rem_euclid(2)..hi[0]).step_by(2) {
+            for x in lo[0]..hi[0] {
                 let p = [x + origin[0], y + origin[1], z + origin[2]];
-                if !ball.contains([x, y, z].map(|v| v.div_euclid(BRICK))) || tiles.grids.at(p[0], p[1], p[2]).is_none_or(|v| v == 0) {
+                let b = [x, y, z].map(|v| v.div_euclid(BRICK));
+                if !ball.contains(b) || tiles.grids.at(p[0], p[1], p[2]).is_none_or(|v| v == 0) {
                     continue;
                 }
                 voxels += 1;
-                assert!((0..3).all(|d| low[d] < p[d] as f32 && (p[d] as f32) < high[d]), "a voxel at {p:?} out of {low:?}..{high:?}");
+                assert!((0..3).all(|d| low[d] <= p[d] as f32 && (p[d] as f32) < high[d]), "a voxel at {p:?} out of {low:?}..{high:?}");
                 for j in 0..SCALES {
-                    let size = BRICK << (2 * j);
-                    // The cells' centres origin + size · k, k's coordinates adding up to an even number, within size + 1 of p.
-                    let near = |d: usize| ([x, y, z][d] - size).div_euclid(size)..=([x, y, z][d] + size).div_euclid(size);
-                    for k in near(2).flat_map(|kz| near(1).flat_map(move |ky| near(0).map(move |kx| [kx, ky, kz]))) {
-                        let [ax, ay, az] = std::array::from_fn(|d| ([x, y, z][d] - k[d] * size).abs());
-                        if (k[0] + k[1] + k[2]) & 1 == 0 && ax + ay <= size && ay + az <= size && ax + az <= size {
-                            assert_ne!(window.counts[cell_entry(k, j)], 0, "a voxel at {p:?} meets the cell of scale {j} about {k:?}");
-                        }
-                    }
+                    assert_ne!(window.counts[cell_entry(cell_of(b, j), j)], 0, "a voxel at {p:?} in a cell of scale {j} counted hollow");
                 }
             }
         }

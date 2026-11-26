@@ -8,7 +8,7 @@ fn effective_area(area: f64, chord: f64, fill: &Fill, centre: Point) -> f64 {
     match fill.at(centre[0], centre[1], centre[2]) {
         // Opaque: the power of nothing is nothing.
         1.0 => area,
-        f => area * (1.0 - js::pow(1.0 - f, chord / CHORD)),
+        f => area * (1.0 - js::pow(1.0 - f, chord)),
     }
 }
 
@@ -26,21 +26,16 @@ fn sites_between(min: At, max: At) -> Box3 {
 }
 
 /**
- * A box's sides: along each axis, the sites in [lo, hi). On a plane of a
- * level's sites (y = 0 at every level), half its lines of sites have one
- * on each face: kept at the bottom and dropped at the top, it would sink
- * half a site, more the coarser the level. Level 0's sink, half a unit, is
- * the reference: a site on a face counts as above it, along `axis`, with
- * the chance ½ + 1/(2s), sites s apart: always at level 0, nearly half
- * the time far away, so a face is where level 0 has it on average
- * (docs/generators.md, "Levels"). By a hash of the position and axis
- * alone, so boxes meeting on a face share its sites, and a site above at
- * one level is above at the finer ones.
+ * A box's sides: along each axis, the points in [lo, hi). Sites are read
+ * at their cubes' middles: one on a face counts as above it, along
+ * `axis`, half the time, so a face is where it is on average however it
+ * lies across the cubes (docs/generators.md, "Levels"). By a hash of the
+ * position and axis alone, so boxes meeting on a face share its sites.
  *
- * A side one site wide keeps its bottom face's sites, as at level 0: each
- * line across it has a site on one face only, and halves of both would
- * let rays through. One under `min` is grown to it about its middle, its
- * faces kept: a sheet midway between two planes is held by both.
+ * A side one site wide keeps its bottom face's sites: each line across
+ * it has a site on one face only, and halves of both would let rays
+ * through. One under `min` is grown to it about its middle, its faces
+ * kept: a sheet midway between two planes is held by both.
  */
 #[derive(Clone, Copy)]
 pub(super) struct Sides {
@@ -48,13 +43,11 @@ pub(super) struct Sides {
     hi: At,
     min: Fixed,
     s: i64,
-    /** Above when the hash is under this, of 2^32. */
-    under: u64,
 }
 
 impl Sides {
     fn new(lo: At, hi: At, min: Fixed, s: i64) -> Sides {
-        Sides { lo, hi, min, s, under: (1 << 31) + (1 << 31) / s as u64 }
+        Sides { lo, hi, min, s }
     }
 
     fn within(&self, axis: usize, p: At) -> bool {
@@ -72,7 +65,7 @@ impl Sides {
             return v == lo;
         }
         let [x, y, z] = p.map(|c| c.div_euclid(ONE));
-        ((hash(SIDE_SEEDS[axis], x, y, z) as u64) < self.under) == (v == lo)
+        (hash(SIDE_SEEDS[axis], x, y, z) < 1 << 31) == (v == lo)
     }
 }
 
@@ -480,34 +473,16 @@ impl Shape {
 }
 
 /**
- * Of the rays through a voxel s across along a face's direction parallel
- * to a sheet t thick, across it near the voxel's centre: the share
- * within the sheet, 2t / 3s (the voxel's section across the face, its
- * width at the sheet over its area).
- */
-const ALONG: f64 = 2.0 / 3.0;
-
-/**
  * The sites that hold `p` between them (in units of their spacing), each
  * with how near it is: shares of 1 whose centre is p, so that what is
  * smaller than a site keeps its place at every level. A cube of the
- * integer grid holds 4 sites, a tetrahedron; its other corners are the
- * middles of octahedra of 6.
+ * integer grid's eight corners, each as near as trilinear weights say.
  */
 pub(super) fn around(p: [f64; 3]) -> Vec<([i64; 3], f64)> {
     let base = p.map(|c| c.floor() as i64);
     let corners = (0..8).map(|k| [0, 1, 2].map(|a| base[a] + (k >> a & 1)));
-    let odd = |c: &[i64; 3]| (c[0] + c[1] + c[2]) & 1 != 0;
-    // How far a corner is, along the axes.
-    let far = |c: [i64; 3]| (0..3).map(|a| (p[a] - c[a] as f64).abs()).sum::<f64>();
-    if let Some(middle) = corners.clone().find(|&c| odd(&c) && far(c) < 1.0) {
-        let rest = (1.0 - far(middle)) / 6.0;
-        let towards = |a: usize, sign: i64| std::array::from_fn(|b| middle[b] + if a == b { sign } else { 0 });
-        let near = |a: usize, sign: i64| rest + (sign as f64 * (p[a] - middle[a] as f64)).max(0.0);
-        return (0..3).flat_map(|a| [-1, 1].map(|sign| (towards(a, sign), near(a, sign)))).collect();
-    }
-    // In the tetrahedron, a site is as near as the point is far from the corner across the cube from it.
-    corners.filter(|c| !odd(c)).map(|c| (c, (far([0, 1, 2].map(|a| 2 * base[a] + 1 - c[a])) - 1.0) / 2.0)).collect()
+    let near = |c: [i64; 3]| (0..3).map(|a| 1.0 - (p[a] - c[a] as f64).abs()).product::<f64>();
+    corners.map(|c| (c, near(c))).filter(|(_, n)| *n > 0.0).collect()
 }
 
 /**
@@ -518,13 +493,18 @@ pub(super) fn around(p: [f64; 3]) -> Vec<([i64; 3], f64)> {
  */
 pub(super) fn draw_shape(shape: &Shape, seed: u64, si: i64, clip: &Box3, put: &mut Put) -> u64 {
     let s = si as f64;
-    let spacing = si * ONE;
+    // Sites are read at their cubes' middles, half a spacing on from s · site.
+    let (spacing, half) = (si * ONE, si * ONE / 2);
     let small = shape.extents.iter().filter(|e| e.to_bits() < spacing).count();
     let mut put =
         |look: Look, share: u32, x: i64, y: i64, z: i64| put(look, shape.op, share, to_pick(hash(seed, x * si, y * si, z * si)), x, y, z);
+    // Its shadow along an axis, on average over them: a box's a sixth of its area, any other's taken as a quarter (a
+    // convex body's over every direction, Cauchy's; a ball's along any).
+    let shadow = shape.area / if matches!(shape.solid, Solid::Cuboid { .. }) { 6.0 } else { 4.0 };
     if small == 3 {
-        let whole = share(shape.area / (VOXEL_AREA * s * s));
-        let around = around(shape.centre.map(|c| c as f64 / spacing as f64));
+        // That over the voxel's.
+        let whole = share(shadow / (s * s));
+        let around = around(shape.centre.map(|c| (c - half) as f64 / spacing as f64));
         // Each site's share of it, rounded down; what that leaves, to the nearest.
         let mut shares: Vec<u32> = around.iter().map(|&(_, near)| (whole as f64 * near) as u32).collect();
         let nearest = (0..shares.len()).max_by_key(|&k| shares[k]).expect("sites around it");
@@ -537,40 +517,39 @@ pub(super) fn draw_shape(shape: &Shape, seed: u64, si: i64, clip: &Box3, put: &m
         return around.len() as u64;
     }
     // A sheet a site thick holds a plane of sites: shapes' sheets lie across an axis, where planes of sites are a site
-    // apart (across (1, 1, 1), 2/√3).
+    // apart; a rod 8/5 of one, a line of them along any direction (along (1, 1, 0), lines are √1.5 apart across it).
     let min = [0, spacing, spacing * 8 / 5][small];
     let b = &shape.bounds;
     // A box's sites on its top faces may count as under them (Sides), past its bounds but at level 0.
     let past = if matches!(shape.solid, Solid::Cuboid { .. } | Solid::Gable { .. }) { 0 } else { ONE };
-    let [x0, y0, z0] = b.min.map(|v| -(-(v * ONE - min / 2)).div_euclid(spacing));
-    let [x1, y1, z1] = b.max.map(|v| (v * ONE - past + min / 2).div_euclid(spacing));
+    let [x0, y0, z0] = b.min.map(|v| -(-(v * ONE - min / 2 - half)).div_euclid(spacing));
+    let [x1, y1, z1] = b.max.map(|v| (v * ONE - past + min / 2 - half).div_euclid(spacing));
     let inside = shape.inside(min, si);
-    // Visits the sites within that are inside; returns about how many it tested (half of each row's points).
+    // Visits the sites within that are inside; returns how many it tested.
     let sites = |within: &Box3, visit: &mut dyn FnMut(i64, i64, i64)| {
         let (z_from, z_to) = (z0.max(within.min[2]), z1.min(within.max[2] - 1));
         let (y_from, y_to) = (y0.max(within.min[1]), y1.min(within.max[1] - 1));
         let (from, x_to) = (x0.max(within.min[0]), x1.min(within.max[0] - 1));
         for z in z_from..=z_to {
             for y in y_from..=y_to {
-                let mut x = from + ((from + y + z) & 1);
-                while x <= x_to {
-                    if inside.holds([x, y, z].map(|v| v * spacing)) {
+                for x in from..=x_to {
+                    if inside.holds([x, y, z].map(|v| v * spacing + half)) {
                         visit(x, y, z);
                     }
-                    x += 2;
                 }
             }
         }
-        [z_to - z_from, y_to - y_from, (x_to - from).div_euclid(2)].iter().map(|n| (n + 1).max(0) as u64).product::<u64>()
+        [z_to - z_from, y_to - y_from, x_to - from].iter().map(|n| (n + 1).max(0) as u64).product::<u64>()
     };
-    // A site's share: its fill over `chords` of the level-0 voxel's chord, once a shape if its fill is constant.
+    // A site's share: its fill over `chords` level-0 voxels crossed along an axis, once a shape if its fill is constant.
+    let read = |v: i64| (v * spacing + half) as f64 / ONE as f64;
     let filled = |chords: f64| {
         let of = move |fill: f64| share(1.0 - js::pow(1.0 - fill, chords));
         let constant = match shape.fill {
             Fill::Const(fill) => Some(of(fill)),
             Fill::At(_) => None,
         };
-        move |x: i64, y: i64, z: i64| constant.unwrap_or_else(|| of(shape.fill.at((x * si) as f64, (y * si) as f64, (z * si) as f64)))
+        move |x: i64, y: i64, z: i64| constant.unwrap_or_else(|| of(shape.fill.at(read(x), read(y), read(z))))
     };
     match small {
         0 => {
@@ -584,12 +563,12 @@ pub(super) fn draw_shape(shape: &Shape, seed: u64, si: i64, clip: &Box3, put: &m
                 Solid::Tube { .. } | Solid::Gable { .. } => None,
             };
             let Some(axis) = axis else {
-                let share = filled(thick / CHORD);
+                let share = filled(thick);
                 return sites(clip, &mut |x, y, z| put(shape.kind.into(), share(x, y, z), x, y, z));
             };
-            // Across it at 45° (every face's direction crossing it), as thick as √2 t; along it, a cell's chord through it.
-            let (across, along) = (filled(thick * std::f64::consts::SQRT_2 / CHORD), filled(s * std::f64::consts::SQRT_2 / CHORD));
-            let within = (ALONG * thick / s).min(1.0);
+            // Across it, t of level 0's crossings; along it, s, by the share of the cube's rows within it, t / s.
+            let (across, along) = (filled(thick), filled(s));
+            let within = (thick / s).min(1.0);
             sites(clip, &mut |x, y, z| {
                 let (across, along) = (across(x, y, z), (along(x, y, z) as f64 * within) as u32);
                 let kind = shape.kind;
@@ -600,133 +579,56 @@ pub(super) fn draw_shape(shape: &Shape, seed: u64, si: i64, clip: &Box3, put: &m
             // Counted whole, so every box gets the same chance.
             let mut count = 0;
             let tested = sites(&EVERYWHERE, &mut |_, _, _| count += 1);
-            let chance = shape.area / (count as f64 * VOXEL_AREA * s * s);
+            let chance = shadow / (count as f64 * s * s);
             tested + sites(clip, &mut |x, y, z| put(shape.kind.into(), share(chance), x, y, z))
         }
     }
 }
 
 /**
- * Of a voxel's chords along a face's direction (`within`'s `across`), the
- * share that meets `parts`, slabs of its extent along an axis in order: what
- * they stop of a voxel otherwise empty. A carve frees those wholly in one,
- * of a voxel otherwise whole.
+ * Of a voxel's chords along an axis (`within`'s `across`), or along
+ * another, the share that meets `parts`, slabs of its extent along the
+ * axis in order: what they stop of a voxel otherwise empty. A carve frees
+ * those wholly in one, of a voxel otherwise whole.
  */
 pub(super) fn slabs(across: bool, parts: impl IntoIterator<Item = (f64, f64)>, carve: bool) -> f64 {
-    let within = within(across);
     if carve {
-        return parts.into_iter().map(|(a, b)| within(a, b)).sum();
+        return parts.into_iter().map(|(a, b)| within(across, a, b)).sum();
     }
     // Chords wholly between the slabs or past them meet none.
     let mut at = -1.0;
     let mut free = 0.0;
     for (a, b) in parts {
-        free += within(at, a);
+        free += within(across, at, a);
         at = f64::max(at, b);
     }
-    (1.0 - free - within(at, 1.0)).clamp(0.0, 1.0)
+    (1.0 - free - within(across, at, 1.0)).clamp(0.0, 1.0)
 }
 
 /**
  * Of the rays through a voxel along an axis, the share that cross [a, b),
  * a slab of its extent along it (−1 to 1, its sites' spacing), and how
- * long they are in the slab on average, of the mean chord's length. So
- * slabs that share a voxel out share its mean chord out, share times length.
+ * long they are in the slab, of the voxel's chord along the axis: all of
+ * them, each as long as the slab is high. So slabs that share a voxel out
+ * share its chord out, share times length.
  */
 pub(super) fn crossed(a: f64, b: f64) -> (f64, f64) {
     let (a, b) = (a.clamp(-1.0, 1.0), b.clamp(-1.0, 1.0));
-    // The voxel's section across the axis w short of its tip, of its widest: a square, its corners cut past half way.
-    // Rays along the axis cross a plane as often as its section is wide, and are in a slab as long as its volume.
-    let section = |w: f64| (4.0 * w * w - 2.0 * (2.0 * w - 1.0).max(0.0).powi(2)) / 2.0;
-    let past = |w: f64| (4.0 * w.powi(3) - (2.0 * w - 1.0).max(0.0).powi(3)) / 6.0;
-    let under = |v: f64| if v < 0.0 { past(1.0 + v) } else { 1.0 - past(1.0 - v) };
-    let nearest = if a < 0.0 && b > 0.0 { 0.0 } else { a.abs().min(b.abs()) };
-    let crossing = section(1.0 - nearest);
-    if crossing <= 0.0 { (0.0, 0.0) } else { (crossing, ((under(b) - under(a)) / crossing).min(1.0)) }
-}
-
-/** Steps the chords' table takes across a voxel's extent along an axis, −1 to 1. */
-const CHORD_STEPS: usize = 64;
-
-/** By whether the chords run across the axis (true) or along a plane across it, the share wholly within [a, b), at every step. */
-type Chords = [Box<[[f32; CHORD_STEPS + 1]; CHORD_STEPS + 1]>; 2];
-
-/**
- * Of a voxel's chords along a face's direction, crossing planes across an
- * axis (`across`, as eight of the twelve do) or within one (the other
- * four): of [a, b), a slab of the voxel's extent along the axis, from
- * −1 to 1 (its sites' spacing), the share that lies wholly within it.
- */
-fn within(across: bool) -> impl Fn(f64, f64) -> f64 {
-    static CHORDS: OnceLock<Chords> = OnceLock::new();
-    let table = &CHORDS.get_or_init(|| [true, false].map(chords))[usize::from(!across)];
-    let at = |v: f64| {
-        let t = (v.clamp(-1.0, 1.0) + 1.0) / 2.0 * CHORD_STEPS as f64;
-        let i = (t as usize).min(CHORD_STEPS - 1);
-        (i, (t - i as f64) as f32)
-    };
-    move |a, b| {
-        if b <= a {
-            return 0.0;
-        }
-        let ((i, u), (j, v)) = (at(a), at(b));
-        let row = |i: usize| table[i][j] * (1.0 - v) + table[i][j + 1] * v;
-        f64::from(row(i) * (1.0 - u) + row(i + 1) * u)
-    }
+    if b <= a { (0.0, 0.0) } else { (1.0, (b - a) / 2.0) }
 }
 
 /**
- * `within`'s table for chords across the y axis, along (1, 1, 0), or
- * within a plane across it, along (1, 0, 1): rays on a grid across them,
- * each chord's lowest and highest y binned to the steps (rounded out),
- * then summed, from the bins at or above each lower step and at or below
- * each upper one.
+ * Of a voxel's chords along the axis (`across` its planes) or along
+ * another (within a plane across it): of [a, b), a slab of the voxel's
+ * extent along the axis, from −1 to 1 (its sites' spacing), the share
+ * that lies wholly within it. One along the axis runs through all of
+ * it; one along another, at one height, as many as the slab is high.
  */
-fn chords(across: bool) -> Box<[[f32; CHORD_STEPS + 1]; CHORD_STEPS + 1]> {
-    const RAYS: i32 = 512;
-    let n = CHORD_STEPS as f64;
-    // The direction, and two across it: the rays' grid, its spacing alike both ways.
-    let (d, e1, e2): ([f64; 3], [f64; 3], [f64; 3]) = if across {
-        ([1.0, 1.0, 0.0], [0.5, -0.5, 0.0], [0.0, 0.0, 0.5f64.sqrt()])
-    } else {
-        ([1.0, 0.0, 1.0], [0.5, 0.0, -0.5], [0.0, 0.5f64.sqrt(), 0.0])
-    };
-    let mut counts = vec![[0u32; CHORD_STEPS + 1]; CHORD_STEPS + 1];
-    let mut total = 0u32;
-    for i in 0..RAYS {
-        for j in 0..RAYS {
-            let [u, v] = [i, j].map(|k| (2.0 * f64::from(k) + 1.0) / f64::from(RAYS) - 1.0).map(|c| c * 2.0);
-            let o: [f64; 3] = std::array::from_fn(|c| u * e1[c] + v * e2[c]);
-            // Within every face: (o + t d) · f ≤ 1.
-            let (mut from, mut to) = (f64::NEG_INFINITY, f64::INFINITY);
-            for f in VOXEL_FACES.map(|f| f.map(f64::from)) {
-                let (of, df) = (o[0] * f[0] + o[1] * f[1] + o[2] * f[2], d[0] * f[0] + d[1] * f[1] + d[2] * f[2]);
-                if df > 0.0 {
-                    to = to.min((1.0 - of) / df);
-                } else if df < 0.0 {
-                    from = from.max((1.0 - of) / df);
-                } else if of > 1.0 {
-                    to = f64::NEG_INFINITY;
-                }
-            }
-            if from >= to {
-                continue;
-            }
-            let (y0, y1) = (o[1] + from * d[1], o[1] + to * d[1]);
-            let (lo, hi) = (y0.min(y1), y0.max(y1));
-            let step = |y: f64| (y + 1.0) / 2.0 * n;
-            counts[(step(lo).floor().max(0.0) as usize).min(CHORD_STEPS)][(step(hi).ceil().max(0.0) as usize).min(CHORD_STEPS)] += 1;
-            total += 1;
-        }
+fn within(across: bool, a: f64, b: f64) -> f64 {
+    let (a, b) = (a.clamp(-1.0, 1.0), b.clamp(-1.0, 1.0));
+    match (b > a, across) {
+        (false, _) => 0.0,
+        (true, true) => f64::from(a == -1.0 && b == 1.0),
+        (true, false) => (b - a) / 2.0,
     }
-    // Wholly within [step i, step j]: lowest at or above i, highest at or below j.
-    let mut table = Box::new([[0.0f32; CHORD_STEPS + 1]; CHORD_STEPS + 1]);
-    let mut sums = vec![[0u32; CHORD_STEPS + 2]; CHORD_STEPS + 2];
-    for i in (0..=CHORD_STEPS).rev() {
-        for j in 0..=CHORD_STEPS {
-            sums[i][j + 1] = counts[i][j] + sums[i + 1][j + 1] + sums[i][j] - sums[i + 1][j];
-            table[i][j] = sums[i][j + 1] as f32 / total as f32;
-        }
-    }
-    table
 }

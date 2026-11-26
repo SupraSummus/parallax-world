@@ -6,7 +6,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::{Arc, OnceLock};
 
-use fcc::{FACE_KINDS, VOXEL_FACES};
+use lattice::{FACE_KINDS, VOXEL_FACES};
 
 use crate::cost::{self, Work};
 use crate::curve::Curve;
@@ -101,7 +101,7 @@ impl Fill {
      * as much as a field's medium of it (FieldValues), at every level.
      */
     pub fn stopping(extinction: f64) -> f64 {
-        1.0 - js::exp(-extinction * CHORD)
+        1.0 - js::exp(-extinction)
     }
 
     fn at(&self, x: f64, y: f64, z: f64) -> f64 {
@@ -274,9 +274,9 @@ impl Node {
 
 /**
  * Part of a line of sites: [from, to) along the line, of `kind`, holding
- * its sites as `holds` says. A line has a site every two spacings, so a
- * span shorter than that is held in part: what is behind it along the
- * line shows through it. One `thick` (build.rs) keeps a site whole.
+ * its sites as `holds` says. A span shorter than a site is held in part:
+ * what is behind it along the line shows through it. One `thick`
+ * (build.rs) keeps a site whole.
  */
 pub struct Span {
     pub from: i64,
@@ -293,9 +293,9 @@ pub enum Holds {
     /**
      * As a medium, by the field's op: stopping this much per lattice unit
      * of a ray's path, so a site whole in it is kept with the chance
-     * 1 − exp(−it · c), c the mean chord of its voxel (about 0.94 units at
-     * level 0, twice that a level up); one in part, through each face as
-     * its chords are in it.
+     * 1 − exp(−it · s), s its voxel's chord along an axis (a site's alpha
+     * is what it stops of a ray crossing it so: lattice's `over`); one in
+     * part, through each face as its chords are in it.
      */
     Medium(f64),
 }
@@ -400,8 +400,9 @@ impl Anchor<'_> {
 }
 
 /**
- * The sites of N·FCC in box `b` (lattice units): the default points of a
- * population (`Population::new`).
+ * The points of N·FCC in box `b` (lattice units), those of N·Z³ whose
+ * coordinates over N add up to an even number: the default points of a
+ * population (`Population::new`), as many as the worlds were made with.
  */
 pub fn lattice(n: i64, b: &Box3) -> Vec<[i64; 3]> {
     let [(i0, i1), (j0, j1), (k0, k1)] = [0, 1, 2].map(|a| ((b.min[a] + n - 1).div_euclid(n), (b.max[a] - 1).div_euclid(n)));
@@ -556,9 +557,6 @@ pub struct Generator {
 pub(crate) const DOCS: &str = "docs/generators.md";
 /** A size no spacing exceeds. */
 pub const ANY_SIZE: i64 = i64::MAX;
-/** A voxel's surface area at level 0, and its mean chord (Cauchy: 4 · volume / area). */
-const VOXEL_AREA: f64 = 6.0 * std::f64::consts::SQRT_2;
-const CHORD: f64 = (4.0 * 2.0) / VOXEL_AREA;
 const PI: f64 = std::f64::consts::PI;
 
 // ---------------------------------------------------------------------------
@@ -576,25 +574,18 @@ pub fn stripe(at: i64, period: i64, dither: u32) -> bool {
 
 const EVERYWHERE: Box3 = Box3 { min: [i64::MIN / 4; 3], max: [i64::MAX / 4; 3] };
 
-/** The site of sites `s` apart nearest to a point: the one whose voxel holds it. */
+/** Where a field reads site `site` of sites `s` apart, lattice units (sites::middle). */
+pub(crate) fn middle(site: i64, s: i64) -> i64 {
+    site * s + sites::middle(s)
+}
+
+/** The site of sites `s` apart whose voxel holds a point: the cube [p, p + 1) · s. */
+#[cfg(test)]
 fn nearest_site(p: At, s: i64) -> [i64; 3] {
     nearest_unit_site(p.map(|c| c.div_euclid(s)))
 }
 
-/** The site nearest to `v`, in units of the sites' spacing (nearest_site of a point divided by it). */
+/** The site whose voxel holds `v`, in units of the sites' spacing (nearest_site of a point divided by it). */
 fn nearest_unit_site(v: At) -> [i64; 3] {
-    let mut r = v.map(|c| (c + ONE / 2) >> 16);
-    if (r[0] + r[1] + r[2]) & 1 != 0 {
-        // Round the coordinate furthest from its integer the other way.
-        let e = [0, 1, 2].map(|i| (v[i] - r[i] * ONE).abs());
-        let i = if e[0] >= e[1] && e[0] >= e[2] {
-            0
-        } else if e[1] >= e[2] {
-            1
-        } else {
-            2
-        };
-        r[i] += if v[i] > r[i] * ONE { 1 } else { -1 };
-    }
-    r
+    v.map(|c| c >> 16)
 }

@@ -3,12 +3,12 @@ place        level    points    inside     nodes    shapes     tests  measured  
 spawn            0         0         0         0         0         0         0     16384    186000         0         0         0 terrain
 spawn            0         0         0         0         0         0         0     16384     32768         0         0         0 learned streets
 spawn            0         0         0         0         0         0         0     16384     32768         0         0         0 fields
-spawn            0        42        40        26         0    119716         0         0      1317         0         0     37460 trees
+spawn            0        42        40        26         0    209473         0         0      1317         0         0     69946 trees
 spawn            0         0         0         0         0         0         0         0         3         0         0         0 settlements
 spawn            0         3         1         0         0         0         0         0       177         0         0         0 boulders
-spawn            0         1         1         1         0      6330         0         0       156         0         0      6330 logs
+spawn            0         1         1         1         0     10880         0         0       156         0         0     10880 logs
 spawn            0         3         2         0         0         0         0         0         7         0         0         0 haystacks
-spawn            0       144       121        68         0     20799         0         0      6620         0         0      2661 plants
+spawn            0       144       121        68         0     18463         0         0      6620         0         0      4114 plants
 spawn            0         0         0         0         0         0         0         0    122970     20495     20491         0 plan ground
 spawn            0         0         0         0         0         0         0         0      1062       354       354         0 plan path
 spawn            0         0         0         0         0         0         0         0       117        13        13         0 plan path's stretch
@@ -22,12 +22,12 @@ spawn            0         0         0         0         0         0         0  
 spawn            1         0         0         0         0         0         0     16384    186000         0         0         0 terrain
 spawn            1         0         0         0         0         0         0     16384     32768         0         0         0 learned streets
 spawn            1         0         0         0         0         0         0     16384     32768         0         0         0 fields
-spawn            1        83        75        75         0     28266         0         0      2897         0         0      4742 trees
+spawn            1        83        75        80         0     57350         0         0      2897         0         0      9112 trees
 spawn            1         0         0         0         0         0         0         0         5         0         0         0 settlements
-spawn            1         6         2         1         0       816         0         0       152         0         0       816 boulders
-spawn            1         2         2         1         0       794         0         0       393         0         0       794 logs
+spawn            1         6         2         1         0      2016         0         0       152         0         0      2016 boulders
+spawn            1         2         2         1         0      1571         0         0       393         0         0      1571 logs
 spawn            1         5         2         0         0         0         0         0        23         0         0         0 haystacks
-spawn            1       400       359       227         0     32242         0         0     19258         0         0       508 plants
+spawn            1       400       359       229         0     37145         0         0     19258         0         0       720 plants
 spawn            1         0         0         0         0         0         0         0    136092     22682     22657         0 plan ground
 spawn            1         0         0         0         0         0         0         0      1164       388       388         0 plan path
 spawn            1         0         0         0         0         0         0         0       126        14        14         0 plan path's stretch
@@ -41,18 +41,18 @@ spawn            1         0         0         0         0         0         0  
 spawn            2         0         0         0         0         0         0     12288    140944         0         0         0 terrain
 spawn            2         0         0         0         0         0         0     12288     24576         0         0         0 learned streets
 spawn            2         0         0         0         0         0         0     12288     24576         0         0         0 fields
-spawn            2       226       222       203         0     22319         0         0      8038         0         0      1574 trees
+spawn            2       226       226       228         0     42545         0         0      8229         0         0      3213 trees
 spawn            2         0         0         0         0         0         0         0         6         0         0         0 settlements
-spawn            2        13         3         2         0       448         0         0       203         0         0       448 boulders
-spawn            2         7         3         1         0       148         0         0       521         0         0       148 logs
+spawn            2        13         4         2         0       696         0         0       210         0         0       672 boulders
+spawn            2         7         3         1         0       182         0         0       506         0         0       182 logs
 spawn            2         9         4         0         0         0         0         0        54         0         0         0 haystacks
-spawn            2         0         0         0         0         0         0         0    121836     20306     20198         0 plan ground
-spawn            2         0         0         0         0         0         0         0      1707       569       569         0 plan path
-spawn            2         0         0         0         0         0         0         0       171        19        19         0 plan path's stretch
-spawn            2         0         0         0         0         0         0         0     56015     16963     16958         0 plan forest columns
-spawn            2         0         0         0         0         0         0         0     50622     16874     16866         0 plan learned spots
-spawn            2         0         0         0         0         0         0         0     33748     16874     16866         0 plan land
-spawn            2         0         0         0         0         0         0         0     22819      4877      4877         0 plan trees
+spawn            2         0         0         0         0         0         0         0    151518     25253     24593         0 plan ground
+spawn            2         0         0         0         0         0         0         0      1878       626       626         0 plan path
+spawn            2         0         0         0         0         0         0         0       180        20        20         0 plan path's stretch
+spawn            2         0         0         0         0         0         0         0     59478     18011     18010         0 plan forest columns
+spawn            2         0         0         0         0         0         0         0     53460     17820     17817         0 plan learned spots
+spawn            2         0         0         0         0         0         0         0     35640     17820     17817         0 plan land
+spawn            2         0         0         0         0         0         0         0     23966      5121      5121         0 plan trees
 spawn            2         0         0         0         0         0         0         0        61         1         1         0 plan settlements
 spawn            2         0         0         0         0         0         0         0       121       121       121         0 plan boulders
 spawn            2         0         0         0         0         0         0         0       169       169       169         0 plan logs
@@ -60,18 +60,18 @@ spawn            2         0         0         0         0         0         0  
 spawn            3         0         0         0         0         0         0     16384    182160         0         0         0 terrain
 spawn            3         0         0         0         0         0         0     16384     32768         0         0         0 learned streets
 spawn            3         0         0         0         0         0         0     16384     32768         0         0         0 fields
-spawn            3       752       720       471         0     21515         0         0     23131         0         0       979 trees
+spawn            3       752       728       564         0     40939         0         0     23447         0         0      1628 trees
 spawn            3         0         0         0         0         0         0         0         6         0         0         0 settlements
-spawn            3        39        10         4         0       152         0         0       378         0         0        96 boulders
-spawn            3        28        18         7         0       447         0         0      2027         0         0       102 logs
-spawn            3        36        11         0         0         0         0         0       311         0         0         0 haystacks
-spawn            3         0         0         0         0         0         0         0    158154     26359     26007         0 plan ground
-spawn            3         0         0         0         0         0         0         0      2904       968       968         0 plan path
+spawn            3        39        11         6         0       216         0         0       385         0         0       120 boulders
+spawn            3        28        22         7         0       744         0         0      2452         0         0       188 logs
+spawn            3        36        11         0         0         0         0         0       314         0         0         0 haystacks
+spawn            3         0         0         0         0         0         0         0    214278     35713     32921         0 plan ground
+spawn            3         0         0         0         0         0         0         0      3123      1041      1041         0 plan path
 spawn            3         0         0         0         0         0         0         0       252        28        28         0 plan path's stretch
-spawn            3         0         0         0         0         0         0         0     81003     24304     24183         0 plan forest columns
-spawn            3         0         0         0         0         0         0         0     72624     24208     24075         0 plan learned spots
-spawn            3         0         0         0         0         0         0         0     48416     24208     24075         0 plan land
-spawn            3         0         0         0         0         0         0         0     49961     10625     10625         0 plan trees
+spawn            3         0         0         0         0         0         0         0     93969     28508     28505         0 plan forest columns
+spawn            3         0         0         0         0         0         0         0     84819     28273     28247         0 plan learned spots
+spawn            3         0         0         0         0         0         0         0     56546     28273     28247         0 plan land
+spawn            3         0         0         0         0         0         0         0     50873     10817     10817         0 plan trees
 spawn            3         0         0         0         0         0         0         0        61         1         1         0 plan settlements
 spawn            3         0         0         0         0         0         0         0       361       361       361         0 plan boulders
 spawn            3         0         0         0         0         0         0         0       441       441       441         0 plan logs
@@ -79,81 +79,81 @@ spawn            3         0         0         0         0         0         0  
 spawn            4         0         0         0         0         0         0     16384    182160         0         0         0 terrain
 spawn            4         0         0         0         0         0         0     16384     32768         0         0         0 learned streets
 spawn            4         0         0         0         0         0         0     16384     32768         0         0         0 fields
-spawn            4         0         0         0         0         0         0     16384    144294         0         0         0 trees
+spawn            4         0         0         0         0         0         0     16384    139909         0         0         0 trees
 spawn            4         1         1         1         0         0         0         0         6         0         0         0 settlements
-spawn            4       173        54        37         0       140         0         0      1348         0         0        36 boulders
-spawn            4        95        68        21         0      1320         0         0      7256         0         0       118 logs
-spawn            4       130        50         0         0         0         0         0       881         0         0         0 haystacks
+spawn            4       173        59        49         0       308         0         0      1383         0         0        96 boulders
+spawn            4        95        80        29         0      2921         0         0      8436         0         0       200 logs
+spawn            4       130        61         0         0         0         0         0       929         0         0         0 haystacks
 spawn            4         0         0         0         0         0         0         0        61         1         1         0 plan settlements
-spawn            4         0         0         0         0         0         0         0    171372     28562     27608         0 plan ground
-spawn            4         0         0         0         0         0         0         0    216966     72322     43669         0 plan learned spots
-spawn            4         0         0         0         0         0         0         0    123968     61984     43669         0 plan land
+spawn            4         0         0         0         0         0         0         0    294348     49058     44772         0 plan ground
+spawn            4         0         0         0         0         0         0         0    187542     62514     43682         0 plan learned spots
+spawn            4         0         0         0         0         0         0         0     93872     46936     43682         0 plan land
 spawn            4         0         0         0         0         0         0         0      1225      1225      1225         0 plan boulders
-spawn            4         0         0         0         0         0         0         0      5445      1815      1815         0 plan path
+spawn            4         0         0         0         0         0         0         0      5568      1856      1856         0 plan path
 spawn            4         0         0         0         0         0         0         0       369        41        41         0 plan path's stretch
 spawn            4         0         0         0         0         0         0         0      1369      1369      1369         0 plan logs
-spawn            4         0         0         0         0         0         0         0     92946     28500     27587         0 plan forest columns
+spawn            4         0         0         0         0         0         0         0    156861     46756     43977         0 plan forest columns
 spawn            4         0         0         0         0         0         0         0         0      1225      1225         0 plan haystacks
 spawn            4         0         0         0         0         0         0         0    135510     28731     24649         0 plan trees
 spawn            5         0         0         0         0         0         0     16384    182160         0         0         0 terrain
 spawn            5         0         0         0         0         0         0     16384     32768         0         0         0 learned streets
 spawn            5         0         0         0         0         0         0     16384     32768         0         0         0 fields
-spawn            5         0         0         0         0         0         0     16384    106334         0         0         0 trees
+spawn            5         0         0         0         0         0         0     16384    114433         0         0         0 trees
 spawn            5         1         1         1         0         0         0         0         6         0         0         0 settlements
-spawn            5       575        84         0         0         0         0         0      2837         0         0         0 haystacks
+spawn            5       604       201         0         0         0         0         0      3519         0         0         0 haystacks
 spawn            5         0         0         0         0         0         0         0        61         1         1         0 plan settlements
-spawn            5         0         0         0         0         0         0         0    103146     17191     17191         0 plan ground
-spawn            5         0         0         0         0         0         0         0         0      4624      4624         0 plan haystacks
-spawn            5         0         0         0         0         0         0         0     98520     32840     16468         0 plan learned spots
-spawn            5         0         0         0         0         0         0         0     32936     16468     16468         0 plan land
-spawn            5         0         0         0         0         0         0         0      1560       520       520         0 plan path
-spawn            5         0         0         0         0         0         0         0       585        65        65         0 plan path's stretch
-spawn            5         0         0         0         0         0         0         0     57329     16384     16384         0 plan forest columns
+spawn            5         0         0         0         0         0         0         0    115494     19249     19079         0 plan ground
+spawn            5         0         0         0         0         0         0         0         0      4761      4761         0 plan haystacks
+spawn            5         0         0         0         0         0         0         0     98868     32956     16585         0 plan learned spots
+spawn            5         0         0         0         0         0         0         0     33170     16585     16585         0 plan land
+spawn            5         0         0         0         0         0         0         0      1968       656       656         0 plan path
+spawn            5         0         0         0         0         0         0         0       594        66        66         0 plan path's stretch
+spawn            5         0         0         0         0         0         0         0     49122     16384     16384         0 plan forest columns
 spawn            6         0         0         0         0         0         0     16384    182160         0         0         0 terrain
-spawn            6         0         0         0         0         0         0     16384     33368         0         0         0 learned streets
+spawn            6         0         0         0         0         0         0     16384     33374         0         0         0 learned streets
 spawn            6         0         0         0         0         0         0     16384     32768         0         0         0 fields
-spawn            6         0         0         0         0         0         0     16384    114321         0         0         0 trees
-spawn            6         1         1       131         0     64900     55092         0         7         0         0      1908 settlements
+spawn            6         0         0         0         0         0         0     16384     97937         0         0         0 trees
+spawn            6         1         1       139         0    119803     59526         0         7         0         0      2105 settlements
 spawn            6         0         0         0         0         0         0         0        61         1         1         0 plan settlements
-spawn            6         0         0         0         0         0         0         0    102216     17036     17036         0 plan ground
-spawn            6         0         0         0         0         0         0         0      3096      1032      1032         0 plan path
-spawn            6         0         0         0         0         0         0         0      1161       129       129         0 plan path's stretch
-spawn            6         0         0         0         0         0         0         0     65537     16384     16384         0 plan forest columns
-spawn            6         0         0         0         0         0         0         0     98298     32766     16384         0 plan learned spots
+spawn            6         0         0         0         0         0         0         0    109182     18197     18125         0 plan ground
+spawn            6         0         0         0         0         0         0         0      3456      1152      1152         0 plan path
+spawn            6         0         0         0         0         0         0         0      1152       128       128         0 plan path's stretch
+spawn            6         0         0         0         0         0         0         0     49136     16384     16384         0 plan forest columns
+spawn            6         0         0         0         0         0         0         0     98295     32765     16384         0 plan learned spots
 spawn            6         0         0         0         0         0         0         0     32768     16384     16384         0 plan land
 spawn            7         0         0         0         0         0         0     16384    182160         0         0         0 terrain
-spawn            7         0         0         0         0         0         0     16384     32946         0         0         0 learned streets
+spawn            7         0         0         0         0         0         0     16384     32950         0         0         0 learned streets
 spawn            7         0         0         0         0         0         0     16384     32858         0         0         0 fields
-spawn            7         0         0         0         0         0         0     16384    114577         0         0         0 trees
-spawn            7         2         2       188         0     52668     36197         0        11         0         0       683 settlements
+spawn            7         0         0         0         0         0         0     16384    114538         0         0         0 trees
+spawn            7         2         2       208         0     96489     40273         0        11         0         0       711 settlements
 spawn            7         0         0         0         0         0         0         0       258        22        22         0 plan settlements
-spawn            7         0         0         0         0         0         0         0    102216     17036     17036         0 plan ground
-spawn            7         0         0         0         0         0         0         0      6144      2048      2048         0 plan path
+spawn            7         0         0         0         0         0         0         0    113880     18980     18125         0 plan ground
+spawn            7         0         0         0         0         0         0         0      6528      2176      2176         0 plan path
 spawn            7         0         0         0         0         0         0         0      2304       256       256         0 plan path's stretch
-spawn            7         0         0         0         0         0         0         0     65536     16384     16384         0 plan forest columns
-spawn            7         0         0         0         0         0         0         0     98298     32766     16384         0 plan learned spots
+spawn            7         0         0         0         0         0         0         0     65528     16384     16384         0 plan forest columns
+spawn            7         0         0         0         0         0         0         0     98301     32767     16384         0 plan learned spots
 spawn            7         0         0         0         0         0         0         0     32768     16384     16384         0 plan land
 spawn            8         0         0         0         0         0         0     16384    182160         0         0         0 terrain
-spawn            8         0         0         0         0         0         0     16384     32836         0         0         0 learned streets
-spawn            8         0         0         0         0         0         0     16384     32818         0         0         0 fields
-spawn            8         0         0         0         0         0         0     16384    114644         0         0         0 trees
-spawn            8         4         4       380         0     79653     42245         0        16         0         0       143 settlements
+spawn            8         0         0         0         0         0         0     16384     32840         0         0         0 learned streets
+spawn            8         0         0         0         0         0         0     16384     32808         0         0         0 fields
+spawn            8         0         0         0         0         0         0     16384    114640         0         0         0 trees
+spawn            8         4         4       428         0    137028     47615         0        16         0         0       323 settlements
 spawn            8         0         0         0         0         0         0         0       471        50        50         0 plan settlements
-spawn            8         0         0         0         0         0         0         0     97710     17036     17036         0 plan ground
-spawn            8         0         0         0         0         0         0         0      6256      2176      2176         0 plan path
+spawn            8         0         0         0         0         0         0         0    106970     18611     18125         0 plan ground
+spawn            8         0         0         0         0         0         0         0      6631      2303      2303         0 plan path
 spawn            8         0         0         0         0         0         0         0      2304       256       256         0 plan path's stretch
 spawn            8         0         0         0         0         0         0         0     65536     16384     16384         0 plan forest columns
-spawn            8         0         0         0         0         0         0         0     94208     32768     16384         0 plan learned spots
+spawn            8         0         0         0         0         0         0         0     94336     32768     16384         0 plan learned spots
 spawn            8         0         0         0         0         0         0         0     32768     16384     16384         0 plan land
 settlement       0         0         0         0         0         0         0     16384    186000         0         0         0 terrain
 settlement       0         0         0         0         0         0         0     16384     43008         0         0         0 learned streets
 settlement       0         0         0         0         0         0         0     16384     32768         0         0         0 fields
-settlement       0        10         9        71         0    304662         0         0       636         0         0    154153 trees
-settlement       0         1         1         3         0    113284         0         0         5         0         0    113284 settlements
+settlement       0        10         9        71         0    455023         0         0       636         0         0    208131 trees
+settlement       0         1         1         3         0    186952         0         0         5         0         0    186952 settlements
 settlement       0         0         0         0         0         0         0         0       169         0         0         0 boulders
-settlement       0         4         1         1         0       189         0         0       160         0         0       189 logs
+settlement       0         4         1         1         0       320         0         0       160         0         0       320 logs
 settlement       0         1         1         0         0         0         0         0         3         0         0         0 haystacks
-settlement       0       144       121        49         0     13719         0         0      5485         0         0      2661 plants
+settlement       0       144       121        49         0     10937         0         0      5485         0         0      4113 plants
 settlement       0         0         0         0         0         0         0         0    117588     19598     19597         0 plan ground
 settlement       0         0         0         0         0         0         0         0       813       271       271         0 plan path
 settlement       0         0         0         0         0         0         0         0        99        11        11         0 plan path's stretch
@@ -167,13 +167,13 @@ settlement       0         0         0         0         0         0         0  
 settlement       1         0         0         0         0         0         0     16384    186000         0         0         0 terrain
 settlement       1         0         0         0         0         0         0     16384     51424         0         0         0 learned streets
 settlement       1         0         0         0         0         0         0     16384     32768         0         0         0 fields
-settlement       1        31        30       154         0    120392         0         0      1757         0         0     30862 trees
-settlement       1         1         1         6         0    210299         0         0         5         0         0    210299 settlements
+settlement       1        31        31       156         0    228982         0         0      1778         0         0     57318 trees
+settlement       1         1         1         6         0    400601         0         0         5         0         0    400601 settlements
 settlement       1         0         0         0         0         0         0         0       121         0         0         0 boulders
-settlement       1         7         4         3         0      1760         0         0       637         0         0      1140 logs
+settlement       1         7         4         3         0      4284         0         0       637         0         0      2598 logs
 settlement       1         3         3         0         0         0         0         0        19         0         0         0 haystacks
-settlement       1       400       361       120         0     17949         0         0     14718         0         0       457 plants
-settlement       1         0         0         0         0         0         0         0    128598     21433     21418         0 plan ground
+settlement       1       400       361       122         0     27373         0         0     14718         0         0       822 plants
+settlement       1         0         0         0         0         0         0         0    128694     21449     21434         0 plan ground
 settlement       1         0         0         0         0         0         0         0       996       332       332         0 plan path
 settlement       1         0         0         0         0         0         0         0       126        14        14         0 plan path's stretch
 settlement       1         0         0         0         0         0         0         0     67365     20377     20375         0 plan forest columns
@@ -186,103 +186,103 @@ settlement       1         0         0         0         0         0         0  
 settlement       2         0         0         0         0         0         0     16384    186000         0         0         0 terrain
 settlement       2         0         0         0         0         0         0     16384     39200         0         0         0 learned streets
 settlement       2         0         0         0         0         0         0     16384     32768         0         0         0 fields
-settlement       2       147       146      1916         0    222079         0         0      5092         0         0      8748 trees
-settlement       2         1         1        15         0    548580    881088         0         5         0         0    145904 settlements
-settlement       2        10        10        10         0      2138         0         0       241         0         0       420 boulders
-settlement       2        12         8         5         0       741         0         0       917         0         0       210 logs
-settlement       2        10         9         0         0         0         0         0       200         0         0         0 haystacks
-settlement       2         0         0         0         0         0         0         0    131358     21893     21827         0 plan ground
-settlement       2         0         0         0         0         0         0         0      1431       477       477         0 plan path
+settlement       2       147       147      1937         0    414697         0         0      5198         0         0     15244 trees
+settlement       2         1         1        15         0    948518    881088         0         5         0         0    189192 settlements
+settlement       2        10        10        10         0      3504         0         0       238         0         0       630 boulders
+settlement       2        12         8         5         0      1340         0         0       920         0         0       390 logs
+settlement       2        10         9         0         0         0         0         0       197         0         0         0 haystacks
+settlement       2         0         0         0         0         0         0         0    163164     27194     26608         0 plan ground
+settlement       2         0         0         0         0         0         0         0      1542       514       514         0 plan path
 settlement       2         0         0         0         0         0         0         0       162        18        18         0 plan path's stretch
-settlement       2         0         0         0         0         0         0         0     66937     20167     20153         0 plan forest columns
-settlement       2         0         0         0         0         0         0         0     60198     20066     20053         0 plan learned spots
-settlement       2         0         0         0         0         0         0         0     40132     20066     20053         0 plan land
-settlement       2         0         0         0         0         0         0         0     20131      4345      4345         0 plan trees
+settlement       2         0         0         0         0         0         0         0     70472     21235     21234         0 plan forest columns
+settlement       2         0         0         0         0         0         0         0     63228     21076     21074         0 plan learned spots
+settlement       2         0         0         0         0         0         0         0     42152     21076     21074         0 plan land
+settlement       2         0         0         0         0         0         0         0     20359      4393      4393         0 plan trees
 settlement       2         0         0         0         0         0         0         0       121       121       121         0 plan boulders
 settlement       2         0         0         0         0         0         0         0       169       169       169         0 plan logs
 settlement       2         0         0         0         0         0         0         0         0       121       121         0 plan haystacks
 settlement       3         0         0         0         0         0         0     16384    182160         0         0         0 terrain
 settlement       3         0         0         0         0         0         0     16384     35410         0         0         0 learned streets
-settlement       3         0         0         0         0         0         0     16384     35252         0         0         0 fields
-settlement       3       629       611      9093         0    244603         0         0     17901         0         0      1468 trees
-settlement       3         1         1        17         0    474753    976128         0         5         0         0     30725 settlements
-settlement       3        36        34        31         0       906         0         0       525         0         0        60 boulders
-settlement       3        32        26        19         0      1007         0         0      2660         0         0        86 logs
+settlement       3         0         0         0         0         0         0     16384     35306         0         0         0 fields
+settlement       3       629       613      9190         0    400153         0         0     17944         0         0      2417 trees
+settlement       3         1         1        17         0    875856    976128         0         5         0         0     38233 settlements
+settlement       3        36        35        32         0      1226         0         0       529         0         0        90 boulders
+settlement       3        32        28        19         0      1391         0         0      2880         0         0       113 logs
 settlement       3        38        36         0         0         0         0         0       446         0         0         0 haystacks
-settlement       3         0         0         0         0         0         0         0    148902     24817     24630         0 plan ground
-settlement       3         0         0         0         0         0         0         0      2568       856       856         0 plan path
+settlement       3         0         0         0         0         0         0         0    199950     33325     31026         0 plan ground
+settlement       3         0         0         0         0         0         0         0      2751       917       917         0 plan path
 settlement       3         0         0         0         0         0         0         0       234        26        26         0 plan path's stretch
-settlement       3         0         0         0         0         0         0         0     77335     23229     23143         0 plan forest columns
-settlement       3         0         0         0         0         0         0         0     69441     23147     23059         0 plan learned spots
-settlement       3         0         0         0         0         0         0         0     46294     23147     23059         0 plan land
+settlement       3         0         0         0         0         0         0         0     89544     27241     27240         0 plan forest columns
+settlement       3         0         0         0         0         0         0         0     81159     27053     27042         0 plan learned spots
+settlement       3         0         0         0         0         0         0         0     54106     27053     27042         0 plan land
 settlement       3         0         0         0         0         0         0         0     45791      9801      9801         0 plan trees
 settlement       3         0         0         0         0         0         0         0       361       361       361         0 plan boulders
 settlement       3         0         0         0         0         0         0         0       441       441       441         0 plan logs
 settlement       3         0         0         0         0         0         0         0         0       361       361         0 plan haystacks
 settlement       4         0         0         0         0         0         0     16384    182160         0         0         0 terrain
-settlement       4         0         0         0         0         0         0     16384     40818         0         0         0 learned streets
-settlement       4         0         0         0         0         0         0     16384     36118         0         0         0 fields
-settlement       4         0         0         0         0         0         0     16384    138356         0         0         0 trees
-settlement       4         1         1       163         0    702252   1261556         0         5         0         0     45412 settlements
-settlement       4       127       121       115         0      1180         0         0      1620         0         0        48 boulders
-settlement       4        66        63        53         0      3910         0         0      6330         0         0       132 logs
-settlement       4       165       159         1         0         1         0         0      1544         0         0         1 haystacks
-settlement       4         0         0         0         0         0         0         0    160116     26686     25910         0 plan ground
-settlement       4         0         0         0         0         0         0         0    211704     70568     42103         0 plan learned spots
-settlement       4         0         0         0         0         0         0         0    120242     60121     42103         0 plan land
+settlement       4         0         0         0         0         0         0     16384     40774         0         0         0 learned streets
+settlement       4         0         0         0         0         0         0     16384     36309         0         0         0 fields
+settlement       4         0         0         0         0         0         0     16384    134345         0         0         0 trees
+settlement       4         1         1       163         0   1299253   1261556         0         5         0         0     55333 settlements
+settlement       4       127       126       122         0      1826         0         0      1662         0         0        96 boulders
+settlement       4        66        63        54         0      6130         0         0      6303         0         0       244 logs
+settlement       4       165       162         1         0         1         0         0      1568         0         0         1 haystacks
+settlement       4         0         0         0         0         0         0         0    280518     46753     43048         0 plan ground
+settlement       4         0         0         0         0         0         0         0    181089     60363     42112         0 plan learned spots
+settlement       4         0         0         0         0         0         0         0     89332     44666     42112         0 plan land
 settlement       4         0         0         0         0         0         0         0      1225      1225      1225         0 plan boulders
-settlement       4         0         0         0         0         0         0         0      5076      1692      1692         0 plan path
+settlement       4         0         0         0         0         0         0         0      5244      1748      1748         0 plan path
 settlement       4         0         0         0         0         0         0         0       360        40        40         0 plan path's stretch
 settlement       4         0         0         0         0         0         0         0      1369      1369      1369         0 plan logs
-settlement       4         0         0         0         0         0         0         0     86632     26607     25870         0 plan forest columns
+settlement       4         0         0         0         0         0         0         0    148792     44378     42248         0 plan forest columns
 settlement       4         0         0         0         0         0         0         0         0      1225      1225         0 plan haystacks
 settlement       4         0         0         0         0         0         0         0    128770     27359     23409         0 plan trees
 settlement       5         0         0         0         0         0         0     16384    182160         0         0         0 terrain
-settlement       5         0         0         0         0         0         0     16384     34806         0         0         0 learned streets
-settlement       5         0         0         0         0         0         0     16384     33656         0         0         0 fields
-settlement       5         0         0         0         0         0         0     16384    104950         0         0         0 trees
-settlement       5         1         1       163         0    196058    257423         0         6         0         0     10330 settlements
-settlement       5       617       609         1         0         6         0         0      5550         0         0         6 haystacks
-settlement       5         0         0         0         0         0         0         0    103128     17188     17188         0 plan ground
-settlement       5         0         0         0         0         0         0         0         0      4624      4624         0 plan haystacks
-settlement       5         0         0         0         0         0         0         0    100095     33365     16993         0 plan learned spots
-settlement       5         0         0         0         0         0         0         0     33986     16993     16993         0 plan land
-settlement       5         0         0         0         0         0         0         0      1578       526       526         0 plan path
-settlement       5         0         0         0         0         0         0         0       585        65        65         0 plan path's stretch
-settlement       5         0         0         0         0         0         0         0     57218     16384     16384         0 plan forest columns
+settlement       5         0         0         0         0         0         0     16384     34772         0         0         0 learned streets
+settlement       5         0         0         0         0         0         0     16384     33552         0         0         0 fields
+settlement       5         0         0         0         0         0         0     16384    113102         0         0         0 trees
+settlement       5         1         1       163         0    263716    257423         0         6         0         0     11279 settlements
+settlement       5       638       619         1         0         8         0         0      5691         0         0         8 haystacks
+settlement       5         0         0         0         0         0         0         0    124602     20767     20450         0 plan ground
+settlement       5         0         0         0         0         0         0         0         0      4761      4761         0 plan haystacks
+settlement       5         0         0         0         0         0         0         0    100143     33381     17003         0 plan learned spots
+settlement       5         0         0         0         0         0         0         0     34006     17003     17003         0 plan land
+settlement       5         0         0         0         0         0         0         0      1986       662       662         0 plan path
+settlement       5         0         0         0         0         0         0         0       594        66        66         0 plan path's stretch
+settlement       5         0         0         0         0         0         0         0     49152     16384     16384         0 plan forest columns
 settlement       6         0         0         0         0         0         0     16384    182160         0         0         0 terrain
-settlement       6         0         0         0         0         0         0     16384     33274         0         0         0 learned streets
-settlement       6         0         0         0         0         0         0     16384     33013         0         0         0 fields
-settlement       6         0         0         0         0         0         0     16384    114115         0         0         0 trees
-settlement       6         1         1       165         0     83146     77334         0         7         0         0      2673 settlements
+settlement       6         0         0         0         0         0         0     16384     33270         0         0         0 learned streets
+settlement       6         0         0         0         0         0         0     16384     32960         0         0         0 fields
+settlement       6         0         0         0         0         0         0     16384     97909         0         0         0 trees
+settlement       6         1         1       165         0    145798     77334         0         7         0         0      2680 settlements
 settlement       6         0         0         0         0         0         0         0        61         1         1         0 plan settlements
-settlement       6         0         0         0         0         0         0         0    102216     17036     17036         0 plan ground
-settlement       6         0         0         0         0         0         0         0      3096      1032      1032         0 plan path
-settlement       6         0         0         0         0         0         0         0      1161       129       129         0 plan path's stretch
-settlement       6         0         0         0         0         0         0         0     65442     16384     16384         0 plan forest columns
-settlement       6         0         0         0         0         0         0         0     98298     32766     16384         0 plan learned spots
+settlement       6         0         0         0         0         0         0         0    109206     18201     18125         0 plan ground
+settlement       6         0         0         0         0         0         0         0      3456      1152      1152         0 plan path
+settlement       6         0         0         0         0         0         0         0      1152       128       128         0 plan path's stretch
+settlement       6         0         0         0         0         0         0         0     49142     16384     16384         0 plan forest columns
+settlement       6         0         0         0         0         0         0         0     98292     32764     16384         0 plan learned spots
 settlement       6         0         0         0         0         0         0         0     32768     16384     16384         0 plan land
 settlement       7         0         0         0         0         0         0     16384    182160         0         0         0 terrain
-settlement       7         0         0         0         0         0         0     16384     32924         0         0         0 learned streets
-settlement       7         0         0         0         0         0         0     16384     32903         0         0         0 fields
-settlement       7         0         0         0         0         0         0     16384    114326         0         0         0 trees
-settlement       7         2         2       222         0     61770     43740         0        11         0         0       850 settlements
+settlement       7         0         0         0         0         0         0     16384     32902         0         0         0 learned streets
+settlement       7         0         0         0         0         0         0     16384     32918         0         0         0 fields
+settlement       7         0         0         0         0         0         0     16384    114564         0         0         0 trees
+settlement       7         2         2       222         0    104063     43740         0        11         0         0       788 settlements
 settlement       7         0         0         0         0         0         0         0       258        22        22         0 plan settlements
-settlement       7         0         0         0         0         0         0         0    102216     17036     17036         0 plan ground
-settlement       7         0         0         0         0         0         0         0      6144      2048      2048         0 plan path
+settlement       7         0         0         0         0         0         0         0    113910     18985     18125         0 plan ground
+settlement       7         0         0         0         0         0         0         0      6528      2176      2176         0 plan path
 settlement       7         0         0         0         0         0         0         0      2304       256       256         0 plan path's stretch
-settlement       7         0         0         0         0         0         0         0     65419     16384     16384         0 plan forest columns
-settlement       7         0         0         0         0         0         0         0     98298     32766     16384         0 plan learned spots
+settlement       7         0         0         0         0         0         0         0     65526     16384     16384         0 plan forest columns
+settlement       7         0         0         0         0         0         0         0     98304     32768     16384         0 plan learned spots
 settlement       7         0         0         0         0         0         0         0     32768     16384     16384         0 plan land
 settlement       8         0         0         0         0         0         0     16384    182160         0         0         0 terrain
-settlement       8         0         0         0         0         0         0     16384     32828         0         0         0 learned streets
-settlement       8         0         0         0         0         0         0     16384     32855         0         0         0 fields
-settlement       8         0         0         0         0         0         0     16384    114399         0         0         0 trees
-settlement       8         4         4       360         0     77138     40092         0        16         0         0       182 settlements
+settlement       8         0         0         0         0         0         0     16384     32814         0         0         0 learned streets
+settlement       8         0         0         0         0         0         0     16384     32853         0         0         0 fields
+settlement       8         0         0         0         0         0         0     16384    114644         0         0         0 trees
+settlement       8         4         4       360         0    119014     40092         0        16         0         0       272 settlements
 settlement       8         0         0         0         0         0         0         0       471        50        50         0 plan settlements
-settlement       8         0         0         0         0         0         0         0     97710     17036     17036         0 plan ground
-settlement       8         0         0         0         0         0         0         0      6256      2176      2176         0 plan path
-settlement       8         0         0         0         0         0         0         0     65457     16384     16384         0 plan forest columns
+settlement       8         0         0         0         0         0         0         0    107012     18619     18125         0 plan ground
+settlement       8         0         0         0         0         0         0         0      6631      2303      2303         0 plan path
 settlement       8         0         0         0         0         0         0         0      2304       256       256         0 plan path's stretch
-settlement       8         0         0         0         0         0         0         0     94206     32768     16384         0 plan learned spots
+settlement       8         0         0         0         0         0         0         0     65536     16384     16384         0 plan forest columns
+settlement       8         0         0         0         0         0         0         0     94338     32768     16384         0 plan learned spots
 settlement       8         0         0         0         0         0         0         0     32768     16384     16384         0 plan land

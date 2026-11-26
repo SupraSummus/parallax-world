@@ -26,7 +26,7 @@ const HIGH: i64 = m(3.0);
 /** Chambers where galleries meet. */
 const CHAMBER: i64 = m(7.0);
 const CHAMBER_HIGH: i64 = m(4.0);
-/** Stairs: a step down RISE each TREAD (fcc's walk.rs steps up 0.55 m), a storey over a gallery's length. */
+/** Stairs: a step down RISE each TREAD (lattice's walk.rs steps up 0.55 m), a storey over a gallery's length. */
 const RISE: i64 = m(0.5);
 const STEPS: i64 = STOREY / RISE;
 const TREAD: i64 = G / STEPS;
@@ -180,8 +180,7 @@ impl Mine {
         let r = (1..).find(|&r| cells([-r; 3], [r; 3]).any(digs)).expect("a gallery somewhere");
         let c = cells([-r; 3], [r; 3]).find(|&c| digs(c)).expect("found");
         let [x, y, z] = point(c);
-        let (x, y) = (x + G / 2, y + m(1.5));
-        [x, y - (x + y + z).rem_euclid(2), z]
+        [x + G / 2, y + m(1.5), z]
     }
 
     /** What point (i, j, k) digs, if the mine owns it. */

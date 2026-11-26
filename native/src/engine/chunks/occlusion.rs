@@ -12,13 +12,8 @@
 //! Depths are along the face's axis, from the eye, which every ray of the
 //! face goes along, so that along a ray they order as distances do.
 
-/** The buffer's pixels across x / z in [−1, 1]; y / z, in [−1/√2, 1/√2], as many per unit. */
+/** The buffer's pixels across x / z over the face's rays, and as many per unit up y / z. */
 const WIDTH: usize = 128;
-const HEIGHT: usize = 91;
-const Y_HALF: f64 = std::f64::consts::FRAC_1_SQRT_2;
-/** Rays a row, and rows: one through each corner of the pixels. */
-const ACROSS: usize = WIDTH + 1;
-const ROWS: usize = HEIGHT + 1;
 
 /** A box of a face's coordinates in units of grid 0 (x = a · LAYER, y = b, z = c · LAYER): [low, high] each way. */
 pub type Box3 = [[f64; 2]; 3];
@@ -35,18 +30,26 @@ pub enum Cast {
     Stops(f64),
 }
 
-/** Where a face's rays from `eye` stop, as far as they were cast, each with the round it was cast in last; and how many wait. */
+/**
+ * Where a face's rays from `eye` stop, as far as they were cast, each with
+ * the round it was cast in last; and how many wait. Its buffer's pixels
+ * cover the face's rays' tangents, `half` either way across and up, rays
+ * through their corners, `across` a row.
+ */
 pub struct Occlusion {
     eye: [f64; 3],
+    half: [f64; 2],
+    height: usize,
     rays: Vec<(Cast, u32)>,
     round: u32,
     waiting: usize,
 }
 
 impl Occlusion {
-    /** None cast yet, from `eye`, in a face's coordinates in units of grid 0. */
-    pub fn new(eye: [f64; 3]) -> Occlusion {
-        Occlusion { eye, rays: vec![(Cast::Clear(0.0), 0); ACROSS * ROWS], round: 0, waiting: 0 }
+    /** None cast yet, from `eye`, in a face's coordinates in units of grid 0, its rays' tangents `half` either way across and up at most. */
+    pub fn new(eye: [f64; 3], half: [f64; 2]) -> Occlusion {
+        let height = (WIDTH as f64 * half[1] / half[0]).ceil() as usize;
+        Occlusion { eye, half, height, rays: vec![(Cast::Clear(0.0), 0); (WIDTH + 1) * (height + 1)], round: 0, waiting: 0 }
     }
 
     /** Whether any ray waits for what was not known when it was cast. */
@@ -72,18 +75,19 @@ impl Occlusion {
         if z0 <= 0.0 {
             return false;
         }
-        let scale = WIDTH as f64 / 2.0;
+        let [hx, hy] = self.half;
+        let scale = WIDTH as f64 / 2.0 / hx;
         let [i0, i1, j0, j1] =
-            [(x0 / z0).min(x0 / z1) + 1.0, (x1 / z0).max(x1 / z1) + 1.0, (y0 / z0).min(y0 / z1) + Y_HALF, (y1 / z0).max(y1 / z1) + Y_HALF]
+            [(x0 / z0).min(x0 / z1) + hx, (x1 / z0).max(x1 / z1) + hx, (y0 / z0).min(y0 / z1) + hy, (y1 / z0).max(y1 / z1) + hy]
                 .map(|v| v * scale);
-        if i0 < 0.0 || j0 < 0.0 || i1 >= WIDTH as f64 || j1 >= HEIGHT as f64 {
+        if i0 < 0.0 || j0 < 0.0 || i1 >= WIDTH as f64 || j1 >= self.height as f64 {
             return false;
         }
         // The corners of the pixels it touches.
         let (i0, i1, j0, j1) = (i0 as usize, i1 as usize + 1, j0 as usize, j1 as usize + 1);
         (j0..=j1).all(|j| {
             (i0..=i1).all(|i| {
-                let (cast, round) = &mut self.rays[j * ACROSS + i];
+                let (cast, round) = &mut self.rays[j * (WIDTH + 1) + i];
                 let from = match *cast {
                     Cast::Clear(to) if to < z0 => Some(to),
                     Cast::Waits(at) if at < z0 && *round != self.round => Some(at),
@@ -91,7 +95,7 @@ impl Occlusion {
                 };
                 if let Some(from) = from {
                     self.waiting -= usize::from(matches!(cast, Cast::Waits(_)));
-                    (*cast, *round) = (stop([i as f64 / scale - 1.0, j as f64 / scale - Y_HALF], from, z0), self.round);
+                    (*cast, *round) = (stop([i as f64 / scale - hx, j as f64 / scale - hy], from, z0), self.round);
                     self.waiting += usize::from(matches!(cast, Cast::Waits(_)));
                 }
                 matches!(*cast, Cast::Stops(at) if at < z0)
@@ -112,7 +116,7 @@ mod tests {
 
     #[test]
     fn a_wall_hides_what_is_wholly_behind_it_and_nothing_else() {
-        let mut occlusion = Occlusion::new([0.0, 0.0, 0.0]);
+        let mut occlusion = Occlusion::new([0.0, 0.0, 0.0], [1.0, std::f64::consts::FRAC_1_SQRT_2]);
         let mut hides = |shown| occlusion.hides(shown, |t, _, _| wall(t));
         // Behind it, within its shadow from the eye: hidden; nearer than it, or past its shadow: not.
         assert!(hides([[-1.0, 1.0], [-1.0, 1.0], [20.0, 22.0]]));
@@ -126,7 +130,7 @@ mod tests {
 
     #[test]
     fn a_ray_is_cast_as_far_as_what_asks_is_and_on_from_there() {
-        let mut occlusion = Occlusion::new([0.0, 0.0, 0.0]);
+        let mut occlusion = Occlusion::new([0.0, 0.0, 0.0], [1.0, std::f64::consts::FRAC_1_SQRT_2]);
         // Asked about what is nearer than the wall, rays go no farther than it is; then on from there, to the wall.
         let farthest = Cell::new(0.0);
         let near = |_: [f64; 2], from: f64, to: f64| {
@@ -146,7 +150,7 @@ mod tests {
 
     #[test]
     fn rays_that_wait_go_on_from_where_they_were_once_told_to() {
-        let mut occlusion = Occlusion::new([0.0, 0.0, 0.0]);
+        let mut occlusion = Occlusion::new([0.0, 0.0, 0.0], [1.0, std::f64::consts::FRAC_1_SQRT_2]);
         let behind = [[-1.0, 1.0], [-1.0, 1.0], [20.0, 22.0]];
         // At first, the wall's left half is not known: those rays wait at 5.
         let half = |t: [f64; 2], _: f64, _: f64| if t[0] < 0.0 { Cast::Waits(5.0) } else { wall(t) };

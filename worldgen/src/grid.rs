@@ -4,15 +4,15 @@
 
 use std::sync::{LazyLock, OnceLock};
 
-use fcc::{FACE_KINDS, Look, VIEW_WORDS};
+use lattice::{FACE_KINDS, Look, VIEW_WORDS};
 
 use crate::js;
 
 // The baker's grids, as worlds hand them over, the voxel's faces, and a whole site's alpha: it stops every ray.
-pub use fcc::{ALPHA, Grid, VOXEL_FACES};
+pub use lattice::{ALPHA, Grid, VOXEL_FACES};
 
 pub const BRICK: i64 = 8;
-const BRICK_SITES: usize = (BRICK * BRICK * BRICK / 2) as usize;
+const BRICK_SITES: usize = (BRICK * BRICK * BRICK) as usize;
 
 /** Half-open box of integer points: min ≤ p < max on each axis; lattice units, or a level's. */
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -53,10 +53,6 @@ impl Box3 {
     pub fn around(centre: [i64; 3], half: i64) -> Box3 {
         Box3 { min: centre.map(|v| v - half), max: centre.map(|v| v + half) }
     }
-}
-
-pub fn is_site(x: i64, y: i64, z: i64) -> bool {
-    (x + y + z) & 1 == 0
 }
 
 /**
@@ -440,10 +436,9 @@ pub const GLOW_ONE: u32 = 255 << 16;
 pub const COLOUR_ONE: u16 = u16::MAX;
 
 impl VoxelGrid {
-    /** A grid of the sites in `b`, widened by one in x if needed to start and end on an even x. */
+    /** A grid of the sites in `b`. */
     pub fn new(b: &Box3) -> VoxelGrid {
-        let min_x = b.min[0].div_euclid(2) * 2;
-        let nx = 0.max((b.max[0] + 1).div_euclid(2) * 2 - min_x);
+        let (min_x, nx) = (b.min[0], 0.max(b.max[0] - b.min[0]));
         let ny = 0.max(b.max[1] - b.min[1]);
         let nz = 0.max(b.max[2] - b.min[2]);
         let (bx, by, bz) = ((nx + BRICK - 1) / BRICK, (ny + BRICK - 1) / BRICK, (nz + BRICK - 1) / BRICK);
@@ -531,16 +526,12 @@ impl VoxelGrid {
     /** Site (x, y, z)'s index: Err(brick) if that brick is empty, None outside the box or off the sites. */
     fn slot(&self, x: i64, y: i64, z: i64) -> Option<Result<usize, usize>> {
         let (i, j, k) = (x - self.min[0], y - self.min[1], z - self.min[2]);
-        if i < 0 || i >= self.n[0] || j < 0 || j >= self.n[1] || k < 0 || k >= self.n[2] || !is_site(x, y, z) {
+        if i < 0 || i >= self.n[0] || j < 0 || j >= self.n[1] || k < 0 || k >= self.n[2] {
             return None;
         }
         let brick = (((k >> 3) * self.by + (j >> 3)) * self.bx + (i >> 3)) as usize;
         let at = self.bricks[brick];
-        Some(if at < 0 {
-            Err(brick)
-        } else {
-            Ok(at as usize * BRICK_SITES + ((((k & 7) * BRICK + (j & 7)) * BRICK + (i & 7)) >> 1) as usize)
-        })
+        Some(if at < 0 { Err(brick) } else { Ok(at as usize * BRICK_SITES + (((k & 7) * BRICK + (j & 7)) * BRICK + (i & 7)) as usize) })
     }
 
     /** What the voxel at (x, y, z) looks like if its pieces are whole (`look`); 0 if not, outside the box or not a site. */
@@ -560,7 +551,7 @@ impl VoxelGrid {
         }
     }
 
-    /** What the voxel at (x, y, z) looks like to hosts through face `kind` (of fcc's VOXEL_FACES); 0 if none, outside the box or not a site. */
+    /** What the voxel at (x, y, z) looks like to hosts through face `kind` (of lattice's VOXEL_FACES); 0 if none, outside the box or not a site. */
     pub fn face(&self, x: i64, y: i64, z: i64, kind: usize) -> Look {
         match self.slot(x, y, z) {
             Some(Ok(i)) => self.view(i, kind),
@@ -571,7 +562,7 @@ impl VoxelGrid {
     /**
      * What the voxel at (x, y, z)'s pieces look like to a ray along
      * `direction`, shown whole: the mean (linear) of its looks through the
-     * faces turned most against it (fcc's `facing`), as hosts are handed
+     * faces turned most against it (lattice's `facing`), as hosts are handed
      * them (`face`) and the voxels engine shows them; 0 if none, outside
      * the box or not a site.
      */
@@ -579,7 +570,7 @@ impl VoxelGrid {
         match self.slot(x, y, z) {
             Some(Ok(i)) if self.pieces.get(i).0 > 0 => {
                 let (mut sum, mut faces) = ([0; 3], 0);
-                for k in fcc::facing(direction) {
+                for k in lattice::facing(direction) {
                     let look = self.view(i, k).to_le_bytes();
                     (0..3).for_each(|c| sum[c] += linear(look[c]) as u32);
                     faces += 1;
@@ -629,19 +620,19 @@ impl VoxelGrid {
 
     /**
      * Whether hosts show site (x, y, z) as a whole voxel: its pieces whole,
-     * or held in part and whole by the site's coin (fcc's `whole_or_none`).
+     * or held in part and whole by the site's coin (lattice's `whole_or_none`).
      */
     pub fn shows_whole(&self, x: i64, y: i64, z: i64) -> bool {
         match self.slot(x, y, z) {
             // Only pieces can, so a medium's look, dear to make, isn't made.
             Some(Ok(i)) if self.pieces.get(i).0 > 0 => {
-                fcc::alpha_of(fcc::whole_or_none(self.handed(i), x as i32, y as i32, z as i32)) == ALPHA
+                lattice::alpha_of(lattice::whole_or_none(self.handed(i), x as i32, y as i32, z as i32)) == ALPHA
             }
             _ => false,
         }
     }
 
-    /** What site `i`'s pieces look like where whole (fcc's Look); else 0. */
+    /** What site `i`'s pieces look like where whole (lattice's Look); else 0. */
     fn look(&self, i: usize) -> Look {
         if self.whole(i) { self.handed(i) } else { 0 }
     }
@@ -843,7 +834,7 @@ impl VoxelGrid {
         let stops = |i: usize| {
             let site = self.site(i);
             let [r, g, b] = site.seen(site.pieces).0;
-            (fcc::medium(looks[i]) && (r != g || g != b)).then(|| Some([to(i)?, fcc::look([r, g, b], 0)])).flatten()
+            (lattice::medium(looks[i]) && (r != g || g != b)).then(|| Some([to(i)?, lattice::look([r, g, b], 0)])).flatten()
         };
         let mut stops: Vec<[u32; 2]> = held.flat_map(|at| at * BRICK_SITES..(at + 1) * BRICK_SITES).filter_map(stops).collect();
         stops.sort_unstable_by_key(|w| w[0]);
@@ -864,7 +855,7 @@ struct Site {
 
 impl Site {
     /**
-     * What hosts are handed of it (fcc's Look), its pieces seen along a
+     * What hosts are handed of it (lattice's Look), its pieces seen along a
      * face as its `sight` there (`views`) where they stop any of it, else
      * as a whole: whole, held in part or a medium, as much as it stops, in
      * the colour of what its pieces show there and its medium of the rest.
@@ -873,8 +864,8 @@ impl Site {
         let colour = || self.colour(sight.filter(|sight| sight.0 > 0).unwrap_or(self.pieces));
         match (self.pieces.0, self.stops()) {
             (_, 0) => 0,
-            (ALPHA, _) => fcc::look(colour(), ALPHA),
-            (pieces, alpha) => fcc::partial(colour(), alpha, pieces > 0),
+            (ALPHA, _) => lattice::look(colour(), ALPHA),
+            (pieces, alpha) => lattice::partial(colour(), alpha, pieces > 0),
         }
     }
 
@@ -910,7 +901,7 @@ pub fn least(stops: [u8; 3]) -> u8 {
 }
 
 /**
- * A channel of sRGB as linear light, of COLOUR_ONE: fcc::light's, from a
+ * A channel of sRGB as linear light, of COLOUR_ONE: lattice::light's, from a
  * table made once by libm's power (js.rs), so generating is the same on
  * every target and takes no power.
  */
@@ -935,7 +926,7 @@ fn unpremultiplied(c: u16, alpha: u8) -> u16 {
 
 /** A look of colour `colour` (linear, premultiplied by `alpha`, of COLOUR_ONE): its colour unpremultiplied, sRGB. */
 fn look_of(colour: [u16; 3], alpha: u8) -> Look {
-    fcc::look(colour.map(|c| srgb(unpremultiplied(c, alpha))), alpha)
+    lattice::look(colour.map(|c| srgb(unpremultiplied(c, alpha))), alpha)
 }
 
 #[cfg(test)]
@@ -977,8 +968,8 @@ mod tests {
         grid.glow.set(lamp, Some([1, 2, 3]));
         let handed = grid.to_grid();
         // A fifth of white, linear, is 124 of 255 in sRGB.
-        let (dim, white) = (fcc::look([124; 3], ALPHA), fcc::look([255; 3], ALPHA));
-        let held = |c: u8| fcc::partial([c; 3], third, true);
+        let (dim, white) = (lattice::look([124; 3], ALPHA), lattice::look([255; 3], ALPHA));
+        let held = |c: u8| lattice::partial([c; 3], third, true);
         assert_eq!((handed.cells.len(), handed.get(2, 2, 2), handed.get(10, 2, 2)), (2 * BRICK_SITES, 0, dim));
         assert_eq!([2, 3].map(|k| handed.face(10, 2, 2, k)), [dim, white]);
         assert_eq!([2, 3].map(|k| handed.face(12, 2, 2, k)), [held(124), held(255)]);
@@ -1012,8 +1003,7 @@ mod tests {
         // Solid but for a hole at (20, 20, 20), a lamp at (12, 12, 12) and odd views at (44, 44, 44): 6 bricks a side.
         let b = Box3 { min: [0; 3], max: [48; 3] };
         let mut grid = VoxelGrid::new(&b);
-        let sites =
-            || (0..48).flat_map(|z| (0..48).flat_map(move |y| (0..48).map(move |x| [x, y, z]))).filter(|&[x, y, z]| is_site(x, y, z));
+        let sites = || (0..48).flat_map(|z| (0..48).flat_map(move |y| (0..48).map(move |x| [x, y, z])));
         for [x, y, z] in sites() {
             grid.put_whole(x, y, z, [[(1 + (x + y) % 3) as u16 * 1000; 3]; FACE_KINDS]);
         }
@@ -1056,12 +1046,12 @@ mod tests {
         let (pieces, medium, _) = grid.light(2, 2, 0, 0);
         assert_eq!((grid.alpha(2, 2, 0), pieces.0, medium.0), (91, 40, [51; 3]));
         // Hosts see whole pieces whole, what hides behind them not; the rest as much as light sees it stop,
-        // pieces held in part told from a medium alone (fcc's in_part).
-        let (handed, whole) = (grid.to_grid(), fcc::look([255; 3], ALPHA));
+        // pieces held in part told from a medium alone (lattice's in_part).
+        let (handed, whole) = (grid.to_grid(), lattice::look([255; 3], ALPHA));
         assert_eq!([(2, 0), (4, 2)].map(|(x, y)| (handed.get(x, y, 0), handed.solid(x, y, 0))), [(whole, true); 2]);
         for (x, y, pieces, _) in [sites[0], sites[2], sites[3]] {
             let (look, light) = (handed.get(x, y, 0), grid.alpha(x.into(), y.into(), 0));
-            assert!(fcc::alpha_of(look) == light && fcc::in_part(look) == (pieces > 0), "at ({x}, {y}): {look:x}");
+            assert!(lattice::alpha_of(look) == light && lattice::in_part(look) == (pieces > 0), "at ({x}, {y}): {look:x}");
         }
     }
 }

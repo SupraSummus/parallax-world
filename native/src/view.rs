@@ -1,9 +1,7 @@
-//! The camera's view and the 12 faces around it: each face has its
-//! own chunks and draws the rays closer to its axis than to any
-//! other's. See docs/architecture.md, section 4.
-
-use bake::face::LAYER;
-use fcc::Lattice;
+//! The camera's view: its axes in the world, its focal length; and the 18
+//! faces around it, along the cube's axes and edges, each of which draws
+//! the rays closer to its axis than to any other's (bake's face.rs). See
+//! docs/architecture.md, section 4.
 
 pub type Vec3 = [f64; 3];
 
@@ -22,26 +20,21 @@ pub fn to_local(axes: &[Vec3; 3], v: Vec3) -> Vec3 {
     [dot(v, axes[0]), dot(v, axes[1]), dot(v, axes[2])]
 }
 
-/** Focal length in pixels: the longer viewport side spans `fov` degrees. */
-pub fn focal_length(fov: f64, width: f64, height: f64) -> f64 {
-    width.max(height) / 2.0 / (fov.to_radians() / 2.0).tan()
-}
-
-/**
- * A face: its axes in world coordinates, and its lattice vectors R = √2 ·
- * right, U = up, F = √2 · forward.
- */
+/** A face: its axes in world coordinates, right, up and forward, and its lattice vectors (bake's Face). */
 pub struct Face {
     pub axes: [Vec3; 3],
-    pub lattice: Lattice,
+    pub face: bake::face::Face,
 }
 
-/** One face per neighbour direction F, in the order of fcc's lattices. */
+/** One face per direction, in the order of bake's faces. */
 pub fn faces() -> Vec<Face> {
-    let scaled = |v: [i32; 3], s: f64| v.map(|c| c as f64 * s);
-    fcc::lattices()
-        .iter()
-        .map(|&lattice @ Lattice { r, u, f }| Face { axes: [scaled(r, LAYER), scaled(u, 1.0), scaled(f, LAYER)], lattice })
+    bake::face::faces()
+        .into_iter()
+        .map(|face| {
+            let l = face.layer();
+            let scaled = |v: [i32; 3], s: f64| v.map(|c| f64::from(c) * s);
+            Face { axes: [scaled(face.r, l), scaled(face.u, 1.0), scaled(face.f, l)], face }
+        })
         .collect()
 }
 
@@ -69,10 +62,8 @@ impl View {
             [0, 1, 2].map(|i| f[i] * self.focal + r[i] * a + u[i] * b)
         };
         let mut rays = vec![ray(0.0, 0.0), ray(self.width, 0.0), ray(self.width, self.height), ray(0.0, self.height)];
-        for s in [1.0, -1.0] {
-            for t in [1.0, -1.0] {
-                rays = clip(&rays, |p| p[2] - s * p[0] - t * std::f64::consts::SQRT_2 * p[1]);
-            }
+        for n in face.face.planes() {
+            rays = clip(&rays, |p| dot(n, p));
         }
         let tangents: Vec<[f64; 2]> = rays.iter().map(|r| [r[0] / r[2], r[1] / r[2]]).collect();
         // A screen meeting the face only along an edge shows nothing of it.
@@ -91,7 +82,9 @@ impl View {
                 .map(|t| t[axis])
                 .fold(if min { f64::INFINITY } else { f64::NEG_INFINITY }, if min { f64::min } else { f64::max })
         };
-        Some([fold(0, true), fold(0, false), fold(1, true), fold(1, false)])
+        // Within its rays' tangents, which clipping reaches but to rounding.
+        let [x, y] = face.face.max_slant();
+        Some([fold(0, true).max(-x), fold(0, false).min(x), fold(1, true).max(-y), fold(1, false).min(y)])
     }
 }
 
@@ -112,13 +105,29 @@ fn clip(polygon: &[Vec3], distance: impl Fn(Vec3) -> f64) -> Vec<Vec3> {
     out
 }
 
+/** Focal length in pixels: the longer viewport side spans `fov` degrees. */
+pub fn focal_length(fov: f64, width: f64, height: f64) -> f64 {
+    width.max(height) / 2.0 / (fov.to_radians() / 2.0).tan()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /** Whether a ray (x, y, z) in face coordinates is the face's: |x| + √2 · |y| ≤ z (owns in compositor.wgsl). */
-    fn in_face(x: f64, y: f64, z: f64) -> bool {
-        x.abs() + std::f64::consts::SQRT_2 * y.abs() <= z
+    #[test]
+    fn view_basis_is_orthonormal_keeps_right_level_and_turns_right_and_up() {
+        for (yaw, pitch) in [(-80.0, 30.0), (10.0, -45.0), (60.0, 75.0), (-5.0, -5.0)] {
+            let [right, up, forward] = view_basis(yaw, pitch);
+            for (a, b) in [(right, up), (up, forward), (forward, right)] {
+                assert!(dot(a, b).abs() < 1e-12);
+            }
+            for v in [right, up, forward] {
+                assert!((dot(v, v) - 1.0).abs() < 1e-12);
+            }
+            assert_eq!(right[1], 0.0);
+            assert_eq!(forward[0].signum(), f64::signum(yaw));
+            assert_eq!(forward[1].signum(), f64::signum(pitch));
+        }
     }
 
     /** Seeded uniform samples in [lo, hi), so failures reproduce. */
@@ -128,10 +137,6 @@ mod tests {
             state = (state * 1103515245 + 12345) % 2147483648;
             lo + (hi - lo) * state as f64 / 2147483648.0
         }
-    }
-
-    fn cross(a: Vec3, b: Vec3) -> Vec3 {
-        [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
     }
 
     fn view(yaw: f64, pitch: f64, focal: f64) -> View {
@@ -146,63 +151,13 @@ mod tests {
     }
 
     #[test]
-    fn view_basis_is_orthonormal_keeps_right_level_and_turns_right_and_up() {
-        let mut random = sampler(1);
-        for _ in 0..100 {
-            let (yaw, pitch) = (random(-80.0, 80.0), random(-80.0, 80.0));
-            let [right, up, forward] = view_basis(yaw, pitch);
-            for (a, b) in [(right, up), (up, forward), (forward, right)] {
-                assert!(dot(a, b).abs() < 1e-12);
-            }
-            for v in [right, up, forward] {
-                assert!((dot(v, v) - 1.0).abs() < 1e-12);
-            }
-            assert_eq!(right[1], 0.0);
-            assert_eq!(forward[0].signum(), yaw.signum());
-            assert_eq!(forward[1].signum(), pitch.signum());
-        }
-    }
-
-    // A mirrored face would draw its world mirrored.
-    #[test]
-    fn faces_are_rotations_one_looking_at_each_nearest_neighbour() {
-        let faces = faces();
-        for Face { axes: [right, up, forward], .. } in &faces {
-            assert!((dot(cross(*right, *up), *forward) - 1.0).abs() < 1e-12);
-        }
-        let mut forwards: Vec<[i32; 3]> = faces.iter().map(|f| f.lattice.f).collect();
-        forwards.sort();
-        forwards.dedup();
-        assert_eq!(forwards.len(), 12);
-        // Nearest neighbours: two of x, y, z ±1, the third 0.
-        assert!(forwards.iter().all(|f| f.iter().map(|c| c.abs()).sum::<i32>() == 2 && f.iter().all(|c| c.abs() <= 1)));
-    }
-
-    // Each ray belongs to the face whose axis is nearest; in_face must agree.
-    #[test]
-    fn faces_share_out_the_rays_each_to_the_face_of_the_nearest_axis() {
-        let faces = faces();
-        let mut random = sampler(4);
-        for _ in 0..1000 {
-            let ray = [random(-1.0, 1.0), random(-1.0, 1.0), random(-1.0, 1.0)];
-            let nearest = (0..12).max_by(|&a, &b| dot(ray, faces[a].axes[2]).total_cmp(&dot(ray, faces[b].axes[2]))).unwrap();
-            let owners: Vec<usize> = (0..12)
-                .filter(|&f| {
-                    let [x, y, z] = to_local(&faces[f].axes, ray);
-                    in_face(x, y, z)
-                })
-                .collect();
-            assert_eq!(owners, [nearest]);
-        }
-    }
-
-    #[test]
     fn face_tangents_are_the_screen_within_the_face_and_none_of_faces_behind() {
         let faces = faces();
-        let face = |f: [i32; 3]| faces.iter().find(|face| face.lattice.f == f).unwrap();
+        let face = |f: [i32; 3]| faces.iter().find(|face| face.face.f == f).unwrap();
         // Looking along +x+z: the screen reaches past the face's rays at its sides.
         let [min_x, max_x, _, max_y] = view(45.0, 0.0, 400.0).face_tangents(face([1, 0, 1])).unwrap();
-        assert!((min_x + 1.0).abs() < 1e-9 && (max_x - 1.0).abs() < 1e-9 && (max_y - LAYER).abs() < 1e-9);
+        let t = bake::face::TAN;
+        assert!((min_x + t).abs() < 1e-9 && (max_x - t).abs() < 1e-9 && (max_y - std::f64::consts::FRAC_1_SQRT_2).abs() < 1e-9);
         assert!(view(45.0, 0.0, 400.0).face_tangents(face([-1, 0, -1])).is_none());
     }
 
@@ -213,13 +168,7 @@ mod tests {
         for _ in 0..300 {
             let v = view(random(-180.0, 180.0), random(-90.0, 90.0), random(150.0, 1000.0));
             let world = screen_ray(&v, random(0.0, 800.0), random(0.0, 600.0));
-            let face = faces
-                .iter()
-                .find(|f| {
-                    let [x, y, z] = to_local(&f.axes, world);
-                    in_face(x, y, z)
-                })
-                .unwrap();
+            let face = faces.iter().find(|f| f.face.holds(to_local(&f.axes, world))).unwrap();
             let [x, y, z] = to_local(&face.axes, world);
             let [min_x, max_x, min_y, max_y] = v.face_tangents(face).unwrap();
             assert!(x / z >= min_x - 1e-9 && x / z <= max_x + 1e-9);

@@ -12,13 +12,12 @@ use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Condvar, Mutex};
 
-use bake::Baker;
-use bake::face::{LAYER, half_layer, spacing};
 use bake::lod::CellChunk;
-use fcc::GRID_LEVELS;
-use fcc::{TileId, Tiles};
+use bake::{Baker, half_layer};
+use lattice::GRID_LEVELS;
+use lattice::{TileId, Tiles};
 
-use super::compositor::{Flat, GpuCluster, GpuColumn, flatten, tiles, veils};
+use super::compositor::{Flat, GpuCluster, GpuColumn, flatten, veils};
 
 /** A chunk to bake: a cell of a face, reading the tiles of its grid level from the first to the last, each way. */
 #[derive(Clone, Copy)]
@@ -28,23 +27,20 @@ pub struct Request {
     pub tiles: [TileId; 2],
     /** Whether its voxels are lit, by the baker's light (Baker's `light`), or shaded by the way their faces face. */
     pub lit: bool,
-    /** Whether its relief is drawn flat (compositor::flatten). */
-    pub flat: bool,
 }
 
 /**
- * A baked chunk, as the GPU takes it, and where it may be drawn: its
- * relief's columns (compositor::tiles), then its medium's pictures
- * (compositor::veils), and their clusters: its relief's first, the tiles
- * of columns (or, drawn flat, its picture: compositor::flatten), then the
- * medium's from `veils`.
+ * A baked chunk, as the GPU takes it, and where it is drawn from: its
+ * picture (compositor::flatten), then its medium's pictures
+ * (compositor::veils), and their clusters: its picture's runs first, then
+ * the medium's from `veils`.
  */
 pub struct Baked {
     pub origin: [f64; 2],
     pub columns: Vec<GpuColumn>,
     pub clusters: Vec<GpuCluster>,
     pub veils: usize,
-    /** Its relief drawn flat, if its request's is (compositor::flatten). */
+    /** Its picture's plane (compositor::flatten). */
     pub flat: Flat,
 }
 
@@ -186,19 +182,14 @@ fn work(queue: &Queue, send: &Sender<(Request, Baked)>, grids: &Grids, mut baker
             std::mem::swap(&mut baker.light, &mut aside);
         }
         let origin = baker.bake_cell(r.face, &r.cell);
-        // Its column (0, 0): the least (a, b) of its cell's bounds, relative to its origin.
-        let unit = spacing(r.cell.atoms) as f64;
-        let [a, b0, _] = r.cell.bounds().0;
-        let base = [a as f64 * LAYER * unit - origin[0], b0 as f64 * unit - origin[1]];
-        let half_layer = half_layer(r.cell.atoms);
-        let (mut columns, mut clusters, flat) = if r.flat {
-            flatten(&baker.columns, base, unit, half_layer)
-        } else {
-            let (columns, clusters) = tiles(&baker.columns, base, unit, half_layer);
-            (columns, clusters, Flat::default())
-        };
+        let face = &bake::face::faces()[r.face];
+        // Its columns from its column (0, 0), at its origin.
+        let unit = f64::from(1 << r.cell.atoms);
+        let half_layer = half_layer(face, r.cell.atoms);
+        let (mut columns, mut clusters, flat) = flatten(face, &baker.columns, unit, half_layer);
         let veils_at = clusters.len();
-        let (medium, medium_clusters) = veils(&baker.medium, base, unit, half_layer, bake::slab_layers(r.cell.spacing()), columns.len());
+        let slab = bake::slab_layers(r.cell.spacing());
+        let (medium, medium_clusters) = veils(face, &baker.medium, unit, half_layer, slab, columns.len());
         columns.extend(medium);
         clusters.extend(medium_clusters);
         let baked = Baked { origin, columns, clusters, veils: veils_at, flat };

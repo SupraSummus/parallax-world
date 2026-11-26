@@ -3,7 +3,7 @@
 use std::hash::Hash;
 use std::sync::{Arc, Mutex};
 
-use fcc::FastMap;
+use lattice::FastMap;
 
 /**
  * The values of the keys used last: those put or read since it last held

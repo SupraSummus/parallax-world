@@ -1,15 +1,14 @@
 //! Draws a frame's chunks with wgpu,
 //! into a picture of its own, which the window (or a shot) shows:
-//! cells' reliefs of whole voxels, a quad per tile of their columns whose
-//! pixels' rays find the column they meet first (or, drawn flat, runs of
-//! their pictures); only the tiles that may show, culled on the GPU
-//! against the depth of what the last frame showed (compositor.wgsl), then
-//! the sky behind them.
+//! cells' pictures of whole voxels, a quad per run of a row of their
+//! columns; only the runs that may show, culled on the GPU against the
+//! depth of what the last frame showed (compositor.wgsl), then the sky
+//! behind them.
 //! See-through voxels come after, as pictures of each cell's medium slab
 //! by slab, far to near, each over those behind, then over the picture.
 //!
 //! A chunk's columns are uploaded when it comes into view, into a buffer
-//! for all, in clusters (tiles of columns), with its record (where it is,
+//! for all, in clusters (runs of its picture), with its record (where it is,
 //! wherever the camera, and which clusters are its), and dropped when it
 //! leaves, as the frame's changes say (renderer.rs's Change): a change
 //! costs what changed, its writes one copy that the GPU scatters (Arena).
@@ -22,12 +21,12 @@ use std::ops::Range;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use bake::Medium;
-use bake::face::{LAYER, half_layer};
-use bake::lod::{CellChunk, Lod};
+use bake::face::{FACES, Face, faces};
+use bake::lod::{CellChunk, Lod, spread};
+use bake::{Medium, half_layer, plane};
 use egui_wgpu::wgpu;
-use fcc::light::{linear_to_srgb, srgb_to_linear};
-use fcc::{FastMap, FastSet};
+use lattice::light::{linear_to_srgb, srgb_to_linear};
+use lattice::{FastMap, FastSet};
 
 use super::renderer::{Feedback, Frame, Placement};
 use crate::engine::{Colours, Look, Painter};
@@ -45,16 +44,16 @@ use crate::view::{self, Vec3, to_local, view_basis};
 struct GpuRecord {
     /** Top-left corner of what it draws. */
     origin: [f32; 2],
-    /** Its plane's depth along the axis: its cell's site's. */
+    /** Its plane's depth along the axis: its cell's middle's. */
     depth: f32,
     face: u32,
-    /** Its cell's level, and its grid's, and its site's c in its grid's units (CellChunk). */
+    /** Its cell's level, and its grid's, and twice its middle's c in its grid's lattice coordinates (CellChunk::centre). */
     level: i32,
     atoms: i32,
-    site: i32,
+    centre: i32,
     /** RGBA to paint its voxels, shaded as they are (Colours); 0 for their own colours. */
     tint: u32,
-    /** Drawn flat (Flat): the box its columns fill, from its origin; its plane past its own, z0, gx, gy, and how far its edge pillars reach from it. */
+    /** Its picture (Flat): the box its columns fill, from its origin; its plane past its own, z0, gx, gy, and how far its edge pillars reach from it. */
     min: [f32; 2],
     max: [f32; 2],
     plane: [f32; 4],
@@ -69,22 +68,17 @@ struct GpuRecord {
 pub const RECORD: u64 = size_of::<GpuRecord>() as u64;
 const CHUNK: u64 = 80;
 
-/**
- * A column of a chunk's relief (columns in compositor.wgsl): its front's
- * depth and its run, in half layers, as i16s, and its colour; 0, none. Drawn
- * flat, a run of its picture or two colours instead (flatten).
- */
+/** An item of a chunk's picture (columns in compositor.wgsl): a run of it or two colours (flatten), or of its medium's (veils). */
 pub type GpuColumn = [u32; 2];
 
 /**
- * A cluster (Cluster in compositor.wgsl): a tile of a chunk's columns, or
- * runs of a picture. Where they are along the axis, relative to the
- * chunk's origin, and how far past the plane, nearest and farthest; a
- * tile's (or picture's) first column's centre; its first column, its
- * chunk's slot and how many runs, and whether it showed in the last
- * frame; of a picture of medium, its slab's first layer, and how many half
- * layers its halves are (bake's Medium). `pad` makes it as long as the
- * shaders' Cluster, whose vec2fs align it to 8 bytes.
+ * A cluster (Cluster in compositor.wgsl): runs of a picture. Where they
+ * are along the axis, relative to the chunk's origin, and how far past the
+ * plane, nearest and farthest; its picture's first column's centre; its
+ * first run, its chunk's slot and how many runs, and whether it showed in
+ * the last frame; of a picture of medium, its slab's first layer, and how
+ * many half layers its halves are (bake's Medium). `pad` makes it as long
+ * as the shaders' Cluster, whose vec2fs align it to 8 bytes.
  */
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
@@ -127,64 +121,22 @@ impl GpuCluster {
     }
 }
 
-/** Columns a tile has across and rows of them (a column's row is its b, and a row's columns are 2 apart in a). */
-const TILE: i32 = 4;
-
 /**
- * A chunk's columns (bake's Baker::columns) as the GPU takes them, in
- * tiles of TILE × TILE, nearest first, so that what is nearer is mostly
- * drawn first; their `first` counts from the chunk's first column, and
- * their chunk's slot is not in them yet. `base` is where its column (0, 0)
- * is, relative to its origin, `unit` its grid's spacing, both in world
- * units, and `half_layer` a half layer of it. In the bakery's threads, so that
- * a chunk's upload is a copy.
- */
-pub fn tiles(baked: &[[u32; 3]], base: [f64; 2], unit: f64, half_layer: f64) -> (Vec<GpuColumn>, Vec<GpuCluster>) {
-    let i16s = |v: u32| [v as u16, (v >> 16) as u16].map(|v| i32::from(v as i16));
-    // A column (a, b) is in row b, a's of its row 2 apart.
-    let place = |[a, b]: [i32; 2]| [(a - (b & 1)) / 2, b];
-    let tile_of = |c: &[u32; 3]| place(i16s(c[0])).map(|v| v.div_euclid(TILE));
-    let mut sorted: Vec<&[u32; 3]> = baked.iter().collect();
-    sorted.sort_by_key(|c| tile_of(c));
-    let mut columns = Vec::new();
-    let mut tiles = Vec::new();
-    for tile in sorted.chunk_by(|p, q| tile_of(p) == tile_of(q)) {
-        let [i, j] = tile_of(tile[0]);
-        let first = columns.len();
-        columns.resize(first + (TILE * TILE) as usize, [0, 0]);
-        let centre = |[a, b]: [i32; 2]| [base[0] + a as f64 * LAYER * unit, base[1] + b as f64 * unit];
-        // Its first column, (2 TILE i, TILE j), even.
-        let mut t = GpuCluster::new(first, 0, centre([2 * TILE * i, TILE * j]));
-        for c in tile {
-            let ab = i16s(c[0]);
-            let [s, r] = place(ab);
-            columns[first + (r.rem_euclid(TILE) * TILE + s.rem_euclid(TILE)) as usize] = [c[1], c[2]];
-            let [depth, run] = i16s(c[1]);
-            // Its cell (column_at in compositor.wgsl): |u| ≤ LAYER, LAYER |u| + |v| ≤ 3/4, in units.
-            t.hold(centre(ab), [LAYER * unit, 0.75 * unit], [depth, depth + run].map(|d| d as f64 * half_layer));
-        }
-        tiles.push(t);
-    }
-    tiles.sort_by(|a, b| a.near.total_cmp(&b.near));
-    (columns, tiles)
-}
-
-/**
- * A chunk's relief drawn flat (an experiment): a picture of its columns'
- * colours, without their depths, on a plane fixed in the world, which the
- * camera's perspective moves and scales.
- * A column's pillar is what the relief shows of it: a ray slanting σ off
- * the axis sees it over σ times its length across. On the plane a column
- * shows at one depth instead, so where two cells' pictures meet, on planes
- * of their own, a gap may open, at most σ times how far the edge columns'
- * pillars (those beside an empty column) reach from their planes: along a
- * surface parallel to the axis most, where a picture is a row or two of
- * columns and their pillars run through the cell.
+ * A chunk's picture: its columns' colours, without their depths, on a
+ * plane fixed in the world, which the camera's perspective moves and
+ * scales.
+ * A column's pillar (bake's Pillar) is what may show of it: a ray
+ * slanting σ off the axis sees it over σ times its length across. On the
+ * plane a column shows at one depth instead, so where two cells' pictures
+ * meet, on planes of their own, a gap may open, at most σ times how far
+ * the edge columns' pillars (those beside an empty column) reach from
+ * their planes: along a surface parallel to the axis most, where a picture
+ * is a row or two of columns and their pillars run through the cell.
  * So the plane is the one they reach least from (`flatten`), and each
  * frame the picture is drawn enlarged, each edge out by that reach times
- * the slant of the rays to it (`place` in compositor.wgsl), at most the face's
- * (`MAX_SLANT`): neighbours overlap where their pillars would, and depth
- * decides between them.
+ * the slant of the rays to it (`place` in compositor.wgsl), at most the
+ * face's: neighbours overlap where their pillars would, and depth decides
+ * between them.
  */
 #[derive(Clone, Copy, Default)]
 pub struct Flat {
@@ -197,9 +149,6 @@ pub struct Flat {
     pub max: [f64; 2],
 }
 
-/** The face's rays' tangents across and up, at most (|x| + √2 |y| ≤ z). */
-const MAX_SLANT: [f64; 2] = [1.0, std::f64::consts::FRAC_1_SQRT_2];
-
 /** What a slope of 1 costs a picture's plane (flatten), as reach, in its rows' heights: too little to matter but between planes as good. */
 const STEEP: f64 = 1e-3;
 
@@ -207,18 +156,18 @@ const STEEP: f64 = 1e-3;
 const RUNS: usize = 255;
 
 /**
- * A chunk's relief drawn flat (Flat), from its columns as tiles() takes
- * them, as the GPU takes it. Its picture is rows of columns, a column
- * (a, b) in row b, a row's columns 2 apart in a, each a brick a row high
- * and 2 LAYER wide, so that the rows, half a brick apart, fill the plane;
- * it is drawn as the runs of its rows' columns (empty ones, colour 0, left
- * out), a quad each, so that its pixels need nothing left out:
- * runs, each [its row, first column and length (packed: flat_vertex),
- * its first colour], then the colours, two to an item; its first column
- * the least row's (even, so that rows alternate as from (0, 0)) least
- * column in a row. Runs by rows in clusters of at most RUNS, each holding
- * its runs' box, as wide as the picture may be enlarged, and as far past
- * the plane as the picture's plane is over it.
+ * A chunk's picture (Flat), from its columns as the baker makes them
+ * (bake's Baker::columns), along `face`, as the GPU takes it. Its picture
+ * is rows of columns, a column (a, b) in row b, a brick a row high and a
+ * layer wide, so that the rows fill the plane; it is drawn as the runs of
+ * its rows' columns (empty ones, colour 0, left out), a quad each, so that
+ * its pixels need nothing left out: runs, each [its row, first column and
+ * length (packed: flat_vertex), its first colour], then the colours, two
+ * to an item; its first column the least row's least column. Runs by rows
+ * in clusters of at most RUNS, each holding its runs' box, as wide as the
+ * picture may be enlarged, and as far past the plane as the picture's
+ * plane is over it. `unit` is its grid's spacing and `half_layer` a half
+ * layer of it, in world units; its column (0, 0) is at its origin.
  * Of planes of slope g, the one the edge pillars reach least from runs
  * midway through the thinnest slab of that slope holding them, and they
  * reach half its thickness from it: a convex function of g, least within
@@ -227,27 +176,26 @@ const RUNS: usize = 255;
  * as good for one column's pillar: the least steep then (STEEP), as a
  * steep plane near the face's edge shows edge on, a sliver past its cell.
  */
-pub fn flatten(baked: &[[u32; 3]], base: [f64; 2], unit: f64, half_layer: f64) -> (Vec<GpuColumn>, Vec<GpuCluster>, Flat) {
+pub fn flatten(face: &Face, baked: &[[u32; 3]], unit: f64, half_layer: f64) -> (Vec<GpuColumn>, Vec<GpuCluster>, Flat) {
     let i16s = |v: u32| [v as u16, (v >> 16) as u16].map(|v| i32::from(v as i16));
+    let l = face.layer();
     // Each column's place (a, b), centre, and its pillar's ends past the chunk's plane.
     let columns: Vec<([i32; 2], [f64; 2], [f64; 2])> = baked
         .iter()
         .map(|c| {
             let [a, b] = i16s(c[0]);
             let [depth, run] = i16s(c[1]);
-            ([a, b], [base[0] + a as f64 * LAYER * unit, base[1] + b as f64 * unit], [depth, depth + run].map(|d| d as f64 * half_layer))
+            ([a, b], [a as f64 * l * unit, b as f64 * unit], [depth, depth + run].map(|d| d as f64 * half_layer))
         })
         .collect();
     if columns.is_empty() {
         return (Vec::new(), Vec::new(), Flat::default());
     }
-    // The edges: a, b of one parity, six neighbours.
+    // The edges: four neighbours.
     let places: FastSet<[i32; 2]> = columns.iter().map(|c| c.0).collect();
     let edges: Vec<([f64; 2], [f64; 2])> = columns
         .iter()
-        .filter(|(ab, ..)| {
-            [[2, 0], [-2, 0], [1, 1], [-1, 1], [1, -1], [-1, -1]].iter().any(|d| !places.contains(&[ab[0] + d[0], ab[1] + d[1]]))
-        })
+        .filter(|(ab, ..)| [[1, 0], [-1, 0], [0, 1], [0, -1]].iter().any(|d| !places.contains(&[ab[0] + d[0], ab[1] + d[1]])))
         .map(|&(_, centre, ends)| (centre, ends))
         .collect();
     // The slab of slope g holding the edge pillars: its middle at (0, 0), and half its thickness.
@@ -258,17 +206,18 @@ pub fn flatten(baked: &[[u32; 3]], base: [f64; 2], unit: f64, half_layer: f64) -
         });
         ((lo + hi) / 2.0, (hi - lo) / 2.0)
     };
-    let [most_x, most_y] = MAX_SLANT.map(|s| 1.0 / s);
+    let slant = face.max_slant();
+    let [most_x, most_y] = slant.map(|s| 1.0 / s);
     let cost = |g: [f64; 2]| slab(g).1 + STEEP * unit * (g[0].abs() + g[1].abs());
     let gy_for = |gx: f64| least(|gy| cost([gx, gy]), most_y);
     let gx = least(|gx| cost([gx, gy_for(gx)]), most_x);
     let g = [gx, gy_for(gx)];
     let (z0, reach) = slab(g);
-    let (min, max) = bricks_box(unit, columns.iter().map(|c| c.1));
+    let brick = [l * unit, unit];
+    let (min, max) = bricks_box(brick, columns.iter().map(|c| c.1));
     let flat = Flat { plane: [z0, g[0], g[1]], reach, min, max };
     // Its picture: a column's place (r, s), from the first.
-    let mut least = columns.iter().fold([i32::MAX; 2], |l, c| [0, 1].map(|d| l[d].min(place(c.0)[d])));
-    least[0] &= !1;
+    let least = columns.iter().fold([i32::MAX; 2], |l, c| [0, 1].map(|d| l[d].min(place(c.0)[d])));
     let mut shown: Vec<([u32; 2], u32)> = baked
         .iter()
         .zip(&columns)
@@ -280,13 +229,13 @@ pub fn flatten(baked: &[[u32; 3]], base: [f64; 2], unit: f64, half_layer: f64) -
     // Its first colour's, in halves of items, from its cluster's first run.
     let mut picture = packed(&runs, |k, colours| 2 * runs.len() + colours - 2 * (k - k % RUNS));
     picture.extend(shown.chunks(2).map(|pair| [pair[0].1, pair.get(1).map_or(0, |p| p.1)]));
-    let first = column_centre(base, unit, least, 0, 0);
-    let margin = MAX_SLANT.map(|s| s * reach);
+    let first = column_centre(brick, least, 0, 0);
+    let margin = slant.map(|s| s * reach);
     let clusters = runs
         .chunks(RUNS)
         .enumerate()
         .map(|(k, part)| {
-            let (lo, hi) = runs_box(part, base, unit, least);
+            let (lo, hi) = runs_box(brick, part, least);
             let depths = corners(lo, hi).map(|q| flat.depth(q));
             let mut cluster = GpuCluster::new(k * RUNS, part.len(), first);
             let half = [0, 1].map(|d| (hi[d] - lo[d]) / 2.0 + margin[d]);
@@ -324,52 +273,47 @@ fn packed(runs: &[[u32; 3]], colours: impl Fn(usize, usize) -> usize) -> Vec<Gpu
         .collect()
 }
 
-/** The centre of column s of row r of a picture whose least place is `least` (flatten). */
-fn column_centre(base: [f64; 2], unit: f64, least: [i32; 2], r: u32, s: u32) -> [f64; 2] {
-    let first = [base[0] + (2 * least[1]) as f64 * LAYER * unit, base[1] + least[0] as f64 * unit];
-    [first[0] + f64::from(2 * s + (r & 1)) * LAYER * unit, first[1] + f64::from(r) * unit]
+/** The centre of column s of row r of a picture of bricks `brick` wide and high whose least place is `least` (flatten). */
+fn column_centre(brick: [f64; 2], least: [i32; 2], r: u32, s: u32) -> [f64; 2] {
+    [(least[1] as f64 + f64::from(s)) * brick[0], (least[0] as f64 + f64::from(r)) * brick[1]]
 }
 
 /** The box runs' bricks fill. */
-fn runs_box(runs: &[[u32; 3]], base: [f64; 2], unit: f64, least: [i32; 2]) -> ([f64; 2], [f64; 2]) {
-    bricks_box(
-        unit,
-        runs.iter().flat_map(|&[r, s, n]| [column_centre(base, unit, least, r, s), column_centre(base, unit, least, r, s + n - 1)]),
-    )
+fn runs_box(brick: [f64; 2], runs: &[[u32; 3]], least: [i32; 2]) -> ([f64; 2], [f64; 2]) {
+    bricks_box(brick, runs.iter().flat_map(|&[r, s, n]| [column_centre(brick, least, r, s), column_centre(brick, least, r, s + n - 1)]))
 }
 
-/** The box the bricks at `centres` fill. */
-fn bricks_box(unit: f64, centres: impl Iterator<Item = [f64; 2]>) -> ([f64; 2], [f64; 2]) {
-    // A brick's half width and height.
-    let brick = [LAYER * unit, 0.5 * unit];
+/** The box the bricks `brick` wide and high at `centres` fill. */
+fn bricks_box(brick: [f64; 2], centres: impl Iterator<Item = [f64; 2]>) -> ([f64; 2], [f64; 2]) {
     centres.fold(([f64::INFINITY; 2], [f64::NEG_INFINITY; 2]), |(min, max), c| {
-        ([0, 1].map(|d| min[d].min(c[d] - brick[d])), [0, 1].map(|d| max[d].max(c[d] + brick[d])))
+        ([0, 1].map(|d| min[d].min(c[d] - brick[d] / 2.0)), [0, 1].map(|d| max[d].max(c[d] + brick[d] / 2.0)))
     })
 }
 
 /** A picture's place (r, s) of column (a, b): its row, and its count in it. */
 fn place([a, b]: [i32; 2]) -> [i32; 2] {
-    [b, (a - (b & 1)).div_euclid(2)]
+    [b, a]
 }
 
 /**
- * A chunk's medium (bake's Medium) as the GPU takes it, `start` columns
- * into the chunk's: a picture of it per slab, of its columns' bricks as
- * flatten lays them out: [how many columns its rows are, how many rows],
+ * A chunk's medium (bake's Medium) along `face` as the GPU takes it,
+ * `start` items into the chunk's: a picture of it per slab, of its
+ * columns' bricks as flatten lays them out: [how many columns its rows are, how many rows],
  * then its columns, all in their box from its first place, row by row,
  * each an item: [colour, its optical depths in its slab's nearer half and
  * its farther, as f16s], 0 where none. A cluster each, holding its box,
  * from its slab's front to its middle plane, its slab's first layer and
  * its halves' depth.
- * As a relief drawn flat is enlarged by how far its pillars reach (Flat),
+ * As a picture of whole voxels is enlarged by how far its pillars reach (Flat),
  * the box is as much wider as a ray takes its columns aside
  * (veil_fragment): by half the slab's depth times the face's rays' slant,
  * and a column more, as a column's share reaches its neighbours' centres.
  * So neighbours' pictures lie over one another there, each adding its own
  * columns' share.
- * `base`, `unit` and `half_layer` as tiles() takes them.
+ * `unit` and `half_layer` as flatten takes them.
  */
-pub fn veils(medium: &[Medium], base: [f64; 2], unit: f64, half_layer: f64, slab: i32, start: usize) -> (Vec<GpuColumn>, Vec<GpuCluster>) {
+pub fn veils(face: &Face, medium: &[Medium], unit: f64, half_layer: f64, slab: i32, start: usize) -> (Vec<GpuColumn>, Vec<GpuCluster>) {
+    let (brick, slant) = ([face.layer() * unit, unit], face.max_slant());
     let (mut items, mut clusters) = (Vec::new(), Vec::new());
     for picture in medium.chunk_by(|p, q| p.first == q.first) {
         let places = || picture.iter().map(|p| place(p.column));
@@ -378,8 +322,7 @@ pub fn veils(medium: &[Medium], base: [f64; 2], unit: f64, half_layer: f64, slab
         else {
             continue;
         };
-        // Its first row even.
-        let least = [low[0] & !1, low[1]];
+        let least = low;
         let [rows, width] = [high[0] - least[0] + 1, high[1] - least[1] + 1];
         let first = items.len();
         items.push([width as u32, rows as u32]);
@@ -389,14 +332,14 @@ pub fn veils(medium: &[Medium], base: [f64; 2], unit: f64, half_layer: f64, slab
             let [near, far] = p.depth.map(f16_bits);
             items[first + 1 + ((r - least[0]) * width + s - least[1]) as usize] = [p.colour, near | far << 16];
         }
-        let centre = |[r, s]: [i32; 2]| column_centre(base, unit, least, (r - least[0]) as u32, (s - least[1]) as u32);
-        let (lo, hi) = bricks_box(unit, places().map(centre));
+        let centre = |[r, s]: [i32; 2]| column_centre(brick, least, (r - least[0]) as u32, (s - least[1]) as u32);
+        let (lo, hi) = bricks_box(brick, places().map(centre));
         // A column's share reaches its neighbours' centres, and a ray takes those half the slab's depth times its slant aside.
         let deep = f64::from(slab) * half_layer;
-        let margin = [2.0 * LAYER * unit + MAX_SLANT[0] * deep, unit + MAX_SLANT[1] * deep];
+        let margin = [brick[0] + slant[0] * deep, brick[1] + slant[1] * deep];
         // Its sites' outlines span a layer either side of them.
         let middle = f64::from(picture[0].first + slab - 1) * half_layer;
-        let mut cluster = GpuCluster::new(start + first, 1, column_centre(base, unit, least, 0, 0));
+        let mut cluster = GpuCluster::new(start + first, 1, column_centre(brick, least, 0, 0));
         cluster.hold([0, 1].map(|d| (lo[d] + hi[d]) / 2.0), [0, 1].map(|d| (hi[d] - lo[d]) / 2.0 + margin[d]), [middle - deep, middle]);
         (cluster.layer, cluster.half) = (picture[0].first as f32, slab as f32);
         clusters.push(cluster);
@@ -458,8 +401,8 @@ fn least(f: impl Fn(f64) -> f64, most: f64) -> f64 {
  * A hidden cell (renderer.rs's Hidden) as the GPU asks whether it shows
  * (Probe in compositor.wgsl, find_probes): the box all it may draw fills,
  * in its face's coordinates (occlusion.rs's Box3), its face, its cell's
- * level and its site's layer of grid 0, and its id, which the GPU lists if
- * it shows.
+ * level and its layer of cells, K, and its id, which the GPU lists if it
+ * shows.
  */
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
@@ -477,7 +420,7 @@ impl GpuProbe {
     /** Of `cell` of face `face`, all it may draw within `shown`. */
     pub fn new(id: u32, face: usize, cell: &CellChunk, shown: [[f64; 2]; 3]) -> GpuProbe {
         let [x, y, depth] = shown.map(|d| d.map(|v| v as f32));
-        let layer = cell.site[2] << cell.atoms;
+        let layer = cell.index(&faces()[face])[2];
         GpuProbe { min: [x[0], y[0]], max: [x[1], y[1]], depth, face: face as u32, level: cell.level, layer, id }
     }
 
@@ -724,8 +667,7 @@ struct Pipelines {
     composite: wgpu::BindGroupLayout,
     place: wgpu::BindGroupLayout,
     scatter: wgpu::BindGroupLayout,
-    /** The tiles of whole voxels, or their flat pictures; then the pictures of medium one over another, and those over the picture. */
-    tiles: wgpu::RenderPipeline,
+    /** The pictures of whole voxels; then the pictures of medium one over another, and those over the picture. */
     flat: wgpu::RenderPipeline,
     veil: wgpu::RenderPipeline,
     composite_picture: wgpu::RenderPipeline,
@@ -789,8 +731,6 @@ pub struct Compositor {
     veil_places: wgpu::Buffer,
     targets: Option<Targets>,
     seams: bool,
-    /** Whether the frame's reliefs are flat (Frame's `flat`). */
-    flat: bool,
     /** What draws, and by phase what culls. */
     draw_group: Option<wgpu::BindGroup>,
     cull_groups: Vec<wgpu::BindGroup>,
@@ -826,14 +766,13 @@ struct Globals {
     resolution: [f32; 2],
     focal: f32,
     fog_distance: f32,
-    /** Whether whole voxels are drawn as flat pictures, 1, or reliefs' tiles, 0. */
-    flat: f32,
+    pad: f32,
     sky_fog: f32,
     sky_top: [f32; 4],
     horizon: [f32; 4],
     /** The camera's axes in world coordinates: columns of a mat3x3f. */
     sky_view: [[f32; 4]; 3],
-    faces: [FaceView; 12],
+    faces: [FaceView; FACES],
     /** The Lods of whole voxels and of the medium (View's). */
     lod: [i32; 4],
     medium: [i32; 4],
@@ -845,10 +784,12 @@ struct Globals {
 struct FaceView {
     /** The camera's axes in the face's coordinates: columns of a mat3x3f. */
     view: [[f32; 4]; 3],
-    /** Its axis in world coordinates, times √2. */
+    /** Its lattice vector F, and its layers' spacing. */
     axis: [f32; 4],
-    /** The camera, in the face's coordinates. */
+    /** The camera, in the face's coordinates, and the sum of F's components. */
     eye: [f32; 4],
+    /** Its rays' tangents across and up at most, k (bake's Face), and the sum of F's positive components. */
+    slant: [f32; 4],
 }
 
 const DEPTH: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
@@ -1027,7 +968,6 @@ impl Pipelines {
             })
         };
         Pipelines {
-            tiles: render(&draw, "tile_vertex", "tile_fragment", &[], tested.clone(), &[target(format, None)]),
             flat: render(&draw, "flat_vertex", "flat_fragment", &[], tested.clone(), &[target(format, None)]),
             veil: render(&draw, "veil_vertex", "veil_fragment", &[], behind, &[target(VEIL, Some(over_veils))]),
             composite_picture: render(
@@ -1134,7 +1074,7 @@ impl Compositor {
             columns: Arena::new(device, "columns", size_of::<GpuColumn>() as u64, wgpu::BufferUsages::STORAGE, 1 << 20),
             clusters: Arena::new(device, "clusters", size_of::<GpuCluster>() as u64, wgpu::BufferUsages::STORAGE, 1 << 15),
             resident: FastMap::default(),
-            belt: wgpu::util::StagingBelt::new(device.clone(), BELT),
+            belt: wgpu::util::StagingBelt::new(device.clone(), BELT.min(device.limits().max_buffer_size)),
             prepared: None,
             coming: VecDeque::new(),
             held_back: false,
@@ -1148,7 +1088,6 @@ impl Compositor {
             veil_places: buffer(device, "veil places", 4, U::STORAGE | U::COPY_DST),
             targets: None,
             seams: false,
-            flat: false,
             draw_group: None,
             cull_groups: Vec::new(),
             place_group: None,
@@ -1164,7 +1103,7 @@ impl Compositor {
         }
     }
 
-    /** How many tiles (or runs of flat pictures) the frame drawn last drew in each phase, as `easel` reads them from the GPU. */
+    /** How many runs of pictures the frame drawn last drew in each phase, as `easel` reads them from the GPU. */
     pub fn drawn(&self, easel: &Easel) -> [u32; 2] {
         let word = |bytes: &[u8]| u32::from_le_bytes(bytes[..4].try_into().expect("a word"));
         std::array::from_fn(|phase| {
@@ -1174,7 +1113,7 @@ impl Compositor {
         })
     }
 
-    /** Uploads `p`'s chunk's columns and clusters (see tiles), and its record, unless the buffers can hold no more. */
+    /** Uploads `p`'s chunk's columns and clusters (see flatten), and its record, unless the buffers can hold no more. */
     fn upload(&mut self, device: &wgpu::Device, encoder: &mut wgpu::CommandEncoder, p: &Placement, colours: Colours) -> bool {
         let baked = &p.chunk.baked;
         let mut arenas = [&mut self.records, &mut self.columns, &mut self.clusters];
@@ -1197,24 +1136,25 @@ impl Compositor {
             .collect();
         self.clusters.write(range.start, bytemuck::cast_slice(&clusters));
         // A hue per layer of a level's cells (Colours), neighbours in a stack far apart.
-        let cell = &p.cell;
-        let hue = hash(&[p.face as u64, cell.level as u64]) + 0.618 * (cell.site[2] / cell.spacing()) as f64;
-        let tints = [0, tint(hue), tint(hash(&[hue.to_bits(), cell.site[0] as u64, cell.site[1] as u64]))];
+        let (cell, face) = (&p.cell, &faces()[p.face]);
+        let [i, j, k] = cell.index(face);
+        let hue = hash(&[p.face as u64, cell.level as u64]) + 0.618 * f64::from(k);
+        let tints = [0, tint(hue), tint(hash(&[hue.to_bits(), i as u64, j as u64]))];
         let flat = &baked.flat;
         let veils = range.start + baked.veils as u32;
         let record = GpuRecord {
             origin: baked.origin.map(|v| v as f32),
-            depth: (f64::from(cell.site[2] << cell.atoms) * LAYER) as f32,
+            depth: plane(face, cell) as f32,
             face: p.face as u32,
             level: cell.level,
             atoms: cell.atoms,
-            site: cell.site[2],
+            centre: cell.centre(face),
             tint: tints[colours as usize],
             min: flat.min.map(|v| v as f32),
             max: flat.max.map(|v| v as f32),
             plane: [flat.plane[0], flat.plane[1], flat.plane[2], flat.reach].map(|v| v as f32),
             whole: [range.start, veils],
-            half_layer: half_layer(cell.atoms) as f32,
+            half_layer: half_layer(face, cell.atoms) as f32,
             veils: range.end,
         };
         self.records.write(slot, bytemuck::bytes_of(&record));
@@ -1244,7 +1184,7 @@ impl Compositor {
         self.feedback = Some(frame.feedback.clone());
         let read = self.read(device);
         let size = view.pixels.map(|v| v.max(1));
-        (self.seams, self.flat) = (view.seams, frame.flat);
+        self.seams = view.seams;
         let resized = self.targets.as_ref().is_none_or(|t| t.size != size);
         if resized {
             self.targets = Some(Targets::new(device, &self.pipelines, self.format, size));
@@ -1269,7 +1209,7 @@ impl Compositor {
             self.bind_groups(device);
         }
         let sky_fog = 1.0 - (-frame.farthest / view.fog_distance).exp();
-        queue.write_buffer(&self.globals, 0, bytemuck::bytes_of(&view.globals(size, sky_fog, frame.flat)));
+        queue.write_buffer(&self.globals, 0, bytemuck::bytes_of(&view.globals(size, sky_fog)));
         // The frame's probes, sent anew if they changed; not in the frame that read the last, so that it settles.
         self.copying = matches!(self.reading, Reading::Idle) && !read && !frame.probes.is_empty();
         if self.copying {
@@ -1452,8 +1392,8 @@ impl Compositor {
 
     /**
      * Draws the frame prepared last into the picture: its chunks placed
-     * from the camera (place in compositor.wgsl); the tiles (or runs of
-     * flat pictures) that showed last frame, then those that show now that did not, culled
+     * from the camera (place in compositor.wgsl); the runs of pictures
+     * that showed last frame, then those that show now that did not, culled
      * against the farthest depths of the first; then the pictures of
      * medium in front of them, far to near, and those over the picture.
      */
@@ -1506,7 +1446,7 @@ impl Compositor {
         };
         let tiles = |pass: &mut wgpu::RenderPass<'_>, phase: usize| {
             pass.set_bind_group(0, self.draw_group.as_ref(), &[]);
-            pass.set_pipeline(if self.flat { &p.flat } else { &p.tiles });
+            pass.set_pipeline(&p.flat);
             pass.multi_draw_indirect_count(&self.draws[phase], 0, &self.blocks[phase], 0, self.clusters.top);
         };
         cull(encoder, 0);
@@ -1596,7 +1536,7 @@ pub struct View {
     pub pitch: f64,
     pub focal: f64,
     pub fog_distance: f64,
-    pub faces: [[Vec3; 3]; 12],
+    pub faces: [[Vec3; 3]; FACES],
     pub size: [f32; 2],
     pub pixels: [u32; 2],
     /** Whether to draw the seams between faces over the picture. */
@@ -1605,7 +1545,7 @@ pub struct View {
     /** How bright the sky is: 1 by day, less as --light dims it. */
     pub sky: f32,
     pub camera: Vec3,
-    /** Which cells each level claims (Lod::layers), and which the medium's, by their Lods (Lod::for_medium): each its Q, layers of grid 0 to the render distance, its coarsest level and its finest. */
+    /** Which cells each level claims (Lod::layers), and which the medium's, by their Lods (Lod::for_medium): each its Q, the render distance, its coarsest level and its finest. */
     pub lod: [i32; 4],
     pub medium: [i32; 4],
 }
@@ -1630,7 +1570,7 @@ impl View {
     pub fn new(look: &Look) -> View {
         let faces = view::faces();
         let whole = Lod::new(look.shift, look.detail);
-        let lod = |lod: Lod| [lod.q, (look.far / LAYER).ceil() as i32, lod.top(), lod.finest()];
+        let lod = |lod: Lod| [lod.q, look.far.ceil() as i32, lod.top(), lod.finest()];
         View {
             yaw: look.yaw,
             pitch: look.pitch,
@@ -1652,14 +1592,16 @@ impl View {
      * How many half slabs of medium a ray of a face may cross (veil_place):
      * of every level but the coarsest, as many as fit between its planes,
      * 2Q + 1 at most, or the finest's, 4Q + 1, and two more; of the
-     * coarsest, to a cell past the render distance, a slab past that.
+     * coarsest, to a cell past the render distance, a slab past that: as
+     * many layers as an edge face's, the closer.
      */
     fn medium_halves(&self) -> u64 {
-        let [q, layers, top, finest] = self.medium.map(f64::from);
+        let [q, far, top, finest] = self.medium.map(f64::from);
+        let layers = far * std::f64::consts::SQRT_2;
         ((top - finest) * (4.0 * q + 3.0) + layers / 2f64.powf(top - 1.0) + 6.0).ceil() as u64
     }
 
-    fn globals(&self, pixels: [u32; 2], sky_fog: f64, flat: bool) -> Globals {
+    fn globals(&self, pixels: [u32; 2], sky_fog: f64) -> Globals {
         // Dimmed in linear terms, as light adds up.
         let rgba = |c: [f32; 3]| {
             let [r, g, b] = c.map(|c| linear_to_srgb(srgb_to_linear(c) * self.sky));
@@ -1672,15 +1614,22 @@ impl View {
             resolution: pixels.map(|v| v as f32),
             focal: self.focal as f32,
             fog_distance: self.fog_distance as f32,
-            flat: f32::from(u8::from(flat)),
+            pad: 0.0,
             sky_fog: sky_fog as f32,
             sky_top: rgba(SKY_TOP),
             horizon: rgba(SKY_HORIZON),
             sky_view: axes.map(column),
-            faces: self.faces.map(|face| FaceView {
-                view: axes.map(|axis| column(to_local(&face, axis))),
-                axis: column(face[2].map(|v| (v * std::f64::consts::SQRT_2).round())),
-                eye: column(to_local(&face, self.camera)),
+            faces: std::array::from_fn(|f| {
+                let (axes_of, face) = (&self.faces[f], &faces()[f]);
+                let [x, y, z] = to_local(axes_of, self.camera);
+                let sum = (face.f[0] + face.f[1] + face.f[2]) as f32;
+                let [sx, sy] = face.max_slant();
+                FaceView {
+                    view: axes.map(|axis| column(to_local(axes_of, axis))),
+                    axis: [face.f[0] as f32, face.f[1] as f32, face.f[2] as f32, face.layer() as f32],
+                    eye: [x as f32, y as f32, z as f32, sum],
+                    slant: [sx as f32, sy as f32, face.k() as f32, spread(face.f)[1] as f32],
+                }
             }),
             lod: self.lod,
             medium: self.medium,
@@ -1711,8 +1660,7 @@ impl Painter for Compositor {
 
     fn describe(&self, easel: &Easel) -> String {
         let [first, next] = self.drawn(easel);
-        let what = if self.flat { "runs of flat pictures' columns" } else { "tiles of columns" };
-        format!(": {what}, {first} that showed before and {next} more")
+        format!(": runs of pictures' columns, {first} that showed before and {next} more")
     }
 }
 
@@ -1739,9 +1687,10 @@ mod tests {
     #[test]
     fn a_plane_is_no_steeper_than_its_pillars_ask() {
         // Columns [place, depth and run, colour]: one alone, and a row of two a step apart in depth.
-        let alone = flatten(&[[0, 3 | 5 << 16, 1]], [0.0; 2], 1.0, 0.5).2;
+        let face = &faces()[0];
+        let alone = flatten(face, &[[0, 3 | 5 << 16, 1]], 1.0, 0.5).2;
         assert!(alone.plane[1].abs() < 1e-3 && alone.plane[2].abs() < 1e-3, "{:?}", alone.plane);
-        let row = flatten(&[[0, 1 << 16, 1], [2, 1 | 1 << 16, 1]], [0.0; 2], 1.0, 0.5).2;
+        let row = flatten(face, &[[0, 1 << 16, 1], [1, 1 | 1 << 16, 1]], 1.0, 0.5).2;
         assert!(row.plane[1] > 0.1 && row.plane[2].abs() < 1e-3, "{:?}", row.plane);
     }
 
@@ -1761,16 +1710,16 @@ mod tests {
         wgsl::assert_layout!(
             &module,
             "Record",
-            GpuRecord { origin, depth, face, level, atoms, site, tint, min, max, plane, whole, half_layer, veils }
+            GpuRecord { origin, depth, face, level, atoms, centre, tint, min, max, plane, whole, half_layer, veils }
         );
         wgsl::assert_layout!(&module, "Cluster", GpuCluster { min, max, base, first, slot_count, visible, near, far, layer, half, pad });
         assert_eq!(u64::from(wgsl::layout(&module, "Chunk").1), CHUNK);
         wgsl::assert_layout!(
             &module,
             "Globals",
-            Globals { viewport, resolution, focal, fog_distance, flat, sky_fog, sky_top, horizon, sky_view, faces, lod, medium }
+            Globals { viewport, resolution, focal, fog_distance, pad, sky_fog, sky_top, horizon, sky_view, faces, lod, medium }
         );
-        wgsl::assert_layout!(&module, "FaceView", FaceView { view, axis, eye });
+        wgsl::assert_layout!(&module, "FaceView", FaceView { view, axis, eye, slant });
         wgsl::assert_layout!(&module, "Probe", GpuProbe { min, max, depth, face, level, layer, id });
     }
 }

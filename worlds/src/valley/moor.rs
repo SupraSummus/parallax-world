@@ -361,6 +361,13 @@ impl Moorland {
         Some([(s.centre[0] + s.ring[0]).div_euclid(2), s.level.0, (s.centre[1] + s.ring[1]).div_euclid(2)])
     }
 
+    /** Where the pool nearest column (x, z) is, within 16 km, if its water is in pools: its centre, at its water's level. */
+    pub fn pool_nearest(&self, x: i64, z: i64) -> Option<[i64; 3]> {
+        let Water::Pools(pools) = &self.water else { return None };
+        let (_, pool) = pools.nearest(x, z, m(16_000.0), |_| true)?;
+        Some([pool.centre[0], pool.level.0, pool.centre[1]])
+    }
+
     /** The steading reaching column (x, z), if any: its ring within NEAR. */
     fn steading(&self, x: i64, z: i64) -> Option<Steading> {
         self.steadings.near(x, z, NEAR).map(|(_, s)| s)
@@ -689,7 +696,7 @@ fn moor_in(seed: u64, lies: Mist) -> World {
         // Between the hut and its ring, 30 m back; over the origin if there is no steading.
         let [x, z] = moorland.nearest(0, 0).map_or([0; 2], |s| [(s.centre[0] + s.ring[0]) / 2, (s.centre[1] + s.ring[1]) / 2 - m(30.0)]);
         let y = Units(ground.at(x, z)).max(WATER).0 + m(2.0);
-        [x, y + ((x + y + z) & 1), z]
+        [x, y, z]
     };
     let all = Scalar::constant(Fx::ONE);
     let layers = moor.layers(&ground, all.clone(), all);
@@ -908,7 +915,7 @@ fn steading(s: &Steading) -> Node {
  * The hut, in its frame: u along its front, v up from its floor, w back
  * from the front. Drystone walls, a doorway and a window cut through
  * them, a thatched gable roof, a hearth. Its doorway and eaves are high
- * enough, and the doorway wide enough, for a walking body (fcc's walk.rs)
+ * enough, and the doorway wide enough, for a walking body (lattice's walk.rs)
  * to go in and stand, though it collides with coarser voxels.
  */
 fn hut(s: &Steading, random: &mut Rng) -> Node {
@@ -985,7 +992,7 @@ fn cairns(s: &Steading, random: &mut Rng) -> Node {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fcc::walk::{COLLISION_LEVEL, Ground, WalkInput, Walker};
+    use lattice::walk::{COLLISION_LEVEL, Ground, WalkInput, Walker};
     use worldgen::generator::generate;
     use worldgen::grid::Box3;
 
@@ -1011,15 +1018,16 @@ mod tests {
             let [cx, cz] = s.centre;
             let (min_y, max_y) = world.heights_at(level);
             let [x0, z0, x1, z1] = [cx - m(8.0), cz - m(8.0), cx + m(8.0), cz + m(8.0)].map(|v| v >> level);
-            let area = Box3 { min: [2 * (x0 / 2), min_y, z0], max: [x1, max_y, z1] };
-            let tiles = fcc::Tiles::one(generate(&world.generator, &area, level).to_grid());
+            let area = Box3 { min: [x0, min_y, z0], max: [x1, max_y, z1] };
+            let tiles = lattice::Tiles::one(generate(&world.generator, &area, level).to_grid());
             let ground = Ground { tiles: &tiles };
             // Outside its doorway, facing in.
             let [x, _, z] = s.frame().site([s.length / 2, 0, -m(2.0)]);
             let mut body = Walker::at([x as f64, (s.level.0 + m(2.0)) as f64, z as f64]);
             let yaw = ((cx - x) as f64).atan2((cz - z) as f64).to_degrees();
             let forward = WalkInput { forward: 1.0, yaw, ..WalkInput::default() };
-            for _ in 0..2 * 60 {
+            // A second: past its doorway, short of its hearth.
+            for _ in 0..60 {
                 body = body.walk(forward, 1.0 / 60.0, &ground);
             }
             // Inside its walls, standing on its floor.

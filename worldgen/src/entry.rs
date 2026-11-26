@@ -4,7 +4,7 @@
 //! world is written in a crate of its own, touching no other, and the
 //! registry hosts read (worlds' `all`) takes each crate's WORLDS.
 
-use fcc::GRID_LEVELS;
+use lattice::GRID_LEVELS;
 
 use crate::World;
 use crate::checks::contract::{Accuracy, breaks, check, hold_to_baseline};
@@ -97,7 +97,7 @@ pub fn even(entry: &Entry) {
  * What generating `entry`'s world costs (cost) stays within TOLERANCE of
  * its baseline, `dir`/data/cost/<name>.txt: counts of work, the same on
  * every machine, at SEED in the host tiles of its places
- * (World::places) at every level a host makes (fcc's GRID_LEVELS), odd
+ * (World::places) at every level a host makes (lattice's GRID_LEVELS), odd
  * ones too. `COST_BLESS=1` writes the baseline anew. No plan makes a
  * tile's columns over cost::REMADE times each, and no tile is over the
  * budget (cost::BUDGET, estimated) but those it knows.

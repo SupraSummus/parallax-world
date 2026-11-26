@@ -1,29 +1,29 @@
 # city (seed 42): work by tile and layer (worldgen::cost)
 place        level    points    inside     nodes    shapes     tests  measured     reads   lookups     plans  distinct   largest layer
 spawn            0         0         0         0         0         0         0     16384     38544         0         0         0 ground
-spawn            0         1         1         4         0    670760         0         0         0         0         0    670760 district
+spawn            0         1         1         4         0   1189562         0         0         0         0         0   1189562 district
 spawn            0         0         0         0         0         0         0         0         0     33161     33161         0 plan ground
 spawn            1         0         0         0         0         0         0     16384     38544         0         0         0 ground
-spawn            1         1         1         7         0    389328         0         0         0         0         0    389328 district
+spawn            1         1         1         7         0    896502         0         0         0         0         0    896502 district
 spawn            1         0         0         0         0         0         0         0         0     33161     33161         0 plan ground
 spawn            2         0         0         0         0         0         0     16384     38544         0         0         0 ground
-spawn            2         1         1        13         0    500543         0         0         0         0         0    500543 district
-spawn            2         0         0         0         0         0         0         0         0     33161     33161         0 plan ground
+spawn            2         1         1        13         0    838716         0         0         0         0         0    838716 district
+spawn            2         0         0         0         0         0         0         0         0     37257     37257         0 plan ground
 spawn            3         0         0         0         0         0         0     16384     34704         0         0         0 ground
-spawn            3         1         1        13         0     35498         0         0         0         0         0     35498 district
-spawn            3         0         0         0         0         0         0         0         0     32969     32969         0 plan ground
+spawn            3         1         1        13         0     57796         0         0         0         0         0     57796 district
+spawn            3         0         0         0         0         0         0         0         0     34083     33993         0 plan ground
 spawn            4         0         0         0         0         0         0     16384     34704         0         0         0 ground
-spawn            4         1         1        19         0     48217    130680         0         0         0         0     11628 district
-spawn            4         0         0         0         0         0         0         0         0     32969     32969         0 plan ground
+spawn            4         1         1        19         0     76073    130680         0         0         0         0     16496 district
+spawn            4         0         0         0         0         0         0         0         0     33993     33993         0 plan ground
 spawn            5         0         0         0         0         0         0     16384     34704         0         0         0 ground
-spawn            5         1         1        19         0     41166    130680         0         0         0         0      4577 district
-spawn            5         0         0         0         0         0         0         0         0     32969     32969         0 plan ground
+spawn            5         1         1        19         0     65569    130680         0         0         0         0      5992 district
+spawn            5         0         0         0         0         0         0         0         0     33993     33993         0 plan ground
 spawn            6         0         0         0         0         0         0     16384     34704         0         0         0 ground
-spawn            6         1         1        19         0     27214     28158         0         0         0         0      2670 district
-spawn            6         0         0         0         0         0         0         0         0     32969     32969         0 plan ground
+spawn            6         1         1        19         0     35490     28158         0         0         0         0      3590 district
+spawn            6         0         0         0         0         0         0         0         0     33993     33993         0 plan ground
 spawn            7         0         0         0         0         0         0     16384     34704         0         0         0 ground
-spawn            7         1         1        19         0     15359      7776         0         0         0         0      2379 district
-spawn            7         0         0         0         0         0         0         0         0     32969     32969         0 plan ground
+spawn            7         1         1        28         0     34498     11664         0         0         0         0      4852 district
+spawn            7         0         0         0         0         0         0         0         0     34240     33993         0 plan ground
 spawn            8         0         0         0         0         0         0     16384     34704         0         0         0 ground
-spawn            8         1         1        28         0     22198      4732         0         0         0         0      3492 district
-spawn            8         0         0         0         0         0         0         0         0     32969     32969         0 plan ground
+spawn            8         1         1        28         0     30757      4732         0         0         0         0      4759 district
+spawn            8         0         0         0         0         0         0         0         0     33993     33993         0 plan ground

@@ -3,8 +3,8 @@
 # tests out, and pnpm lint checks it (--workspace); web/bindgen/ likewise.
 [workspace]
 resolver = "3"
-members = ["fcc", "bake", "worldgen", "ground", "light", "worlds", "worlds/cheese", "native", "web/bindgen", "lab"]
-default-members = ["fcc", "bake", "worldgen", "ground", "light", "worlds", "worlds/cheese", "native"]
+members = ["lattice", "bake", "worldgen", "ground", "light", "worlds", "worlds/cheese", "native", "web/bindgen", "lab"]
+default-members = ["lattice", "bake", "worldgen", "ground", "light", "worlds", "worlds/cheese", "native"]
 
 # Debug builds keep files and lines, for panics and profiles, but no
 # variables: about half the size on disk.

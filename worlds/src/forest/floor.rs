@@ -63,8 +63,7 @@ pub(super) fn bush(x: f64, y: f64, z: f64, random: &mut Rng) -> Vec<Shape> {
         while n > 0.0 {
             let [dx, dy, dz] = direction(random);
             let (px, py, pz) = (round(x + dx * radius * 0.9), round(y + dy.abs() * radius * 0.9), round(z + dz * radius * 0.9));
-            // On a site.
-            let at = [px, py + ((px as i64 + py as i64 + pz as i64) & 1) as f64, pz];
+            let at = [px, py, pz];
             shapes.push(Shape::cuboid(at, [at[0] + 1.0, at[1] + 1.0, at[2] + 1.0], K::berry).paint());
             n -= 1.0;
         }

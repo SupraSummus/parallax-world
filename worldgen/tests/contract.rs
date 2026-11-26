@@ -14,7 +14,7 @@ use worldgen::generator::{
     generate, kind_of,
 };
 use worldgen::generator::{Anchor, Fill, Point, lattice};
-use worldgen::grid::{ALPHA, Box3, is_site};
+use worldgen::grid::{ALPHA, Box3};
 use worldgen::noise::fx;
 use worldgen::sites::spacing;
 
@@ -302,7 +302,7 @@ fn finds_fog_that_glows_only_near() {
 #[test]
 fn finds_a_speck_too_small_to_show_outside_the_heights() {
     // A speck stops a few of a site's rays: it shows no voxel, but light and the composited rays see it.
-    let speck = world(single(|_| Some(Node::of(vec![ball([64.0, 70.0, 64.0], 0.1, ROCK, SOLID, Op::Fill)])), 64));
+    let speck = world(single(|_| Some(Node::of(vec![ball([64.5, 70.5, 64.5], 0.2, ROCK, SOLID, Op::Fill)])), 64));
     let grid = generate(&speck, &near(), 0);
     assert!(grid.pieces.alpha.iter().all(|&a| a < ALPHA) && grid.pieces.alpha.iter().any(|&a| a > 0), "the speck shows");
     let broken = heights_hold(&world_of(speck, (-64, 64)), 0);
@@ -386,10 +386,7 @@ fn kinds_drawn(generator: &Generator, b: &Box3, level: u32) -> BTreeSet<Option<&
     let grid = generate(generator, b, level);
     let kind = kind_of(generator);
     let sites = (b.min[2]..b.max[2]).flat_map(|z| (b.min[1]..b.max[1]).flat_map(move |y| (b.min[0]..b.max[0]).map(move |x| [x, y, z])));
-    sites
-        .filter(|&[x, y, z]| is_site(x, y, z) && grid.inside(x, y, z) != 0)
-        .map(|[x, y, z]| kind(grid.inside(x, y, z)).map(|k| k.name))
-        .collect()
+    sites.filter(|&[x, y, z]| grid.inside(x, y, z) != 0).map(|[x, y, z]| kind(grid.inside(x, y, z)).map(|k| k.name)).collect()
 }
 
 #[test]

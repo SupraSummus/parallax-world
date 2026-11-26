@@ -30,12 +30,7 @@ pub(crate) fn box_at(r: &Box3, level: u32) -> Box3 {
 }
 
 pub(crate) fn sites(b: &Box3) -> impl Iterator<Item = (i64, i64, i64)> + '_ {
-    (b.min[2]..b.max[2]).flat_map(move |z| {
-        (b.min[1]..b.max[1]).flat_map(move |y| {
-            let from = b.min[0] + ((b.min[0] + y + z) & 1);
-            (from..b.max[0]).step_by(2).map(move |x| (x, y, z))
-        })
-    })
+    (b.min[2]..b.max[2]).flat_map(move |z| (b.min[1]..b.max[1]).flat_map(move |y| (b.min[0]..b.max[0]).map(move |x| (x, y, z))))
 }
 
 /**
@@ -285,8 +280,8 @@ fn hold_region(world: &World, region: &Region, before: &[Region], levels: u32) -
                 let n = cells.len() as f64;
                 let looks = [0, 1].map(|i| std::array::from_fn(|k| cells.iter().map(|cell| cell[i][k]).sum::<f64>() / n));
                 let spread = cells.iter().map(cells::deviation).sum::<f64>() / n;
-                // A cell is seen along each of the 12 directions.
-                let cells = cells.len() / fcc::VOXEL_FACES.len();
+                // A cell is seen along each of the 6 directions.
+                let cells = cells.len() / lattice::VOXEL_FACES.len();
                 margins.push(Margin { region: region.area, stratum: stratum.name.clone(), level, against, looks, spread, cells });
             }
         }

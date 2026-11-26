@@ -1,6 +1,6 @@
-//! What the masked models share (masked.rs on cubic grids, masked_fcc.rs
-//! on the FCC lattice): the step schedule, k-means for codes, and the
-//! network that draws a cell from its slots, trained by Adam.
+//! What the masked model (masked.rs) is made of: the step schedule,
+//! k-means for codes, and the network that draws a cell from its slots,
+//! trained by Adam.
 
 use worldgen::noise::{Rng, unit};
 
