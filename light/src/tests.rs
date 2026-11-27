@@ -40,7 +40,13 @@ fn world_with(
     let lamps = Population::new("lamps", 1.0, 1024).reach(2048).at(|_| vec![([0.0; 3], ())], move |_, _| Some(Node::of(shapes.clone())));
     let ground = Field::at("stone", 0.0, Op::Fill, move |x, y, z| stone(x, y, z, worldgen::sites::spacing()).then_some((STONE, None)));
     let layers = vec![Layer::Field(ground), Layer::Population(lamps)];
-    World { generator: Generator { kinds, seed: 1, layers }, spawn: [0; 3], heights: Some((-64, 1024)), points: Vec::new() }
+    World {
+        generator: Generator { kinds, seed: 1, layers },
+        spawn: [0; 3],
+        heights: Some((-64, 1024)),
+        points: Vec::new(),
+        edits: Default::default(),
+    }
 }
 
 /** A cube the lamps' size about `p`. */
@@ -95,6 +101,7 @@ fn a_medium_stops_more_of_the_channels_its_colour_is_darker_in() {
             spawn: [0; 3],
             heights: Some((-64, 1024)),
             points: Vec::new(),
+            edits: Default::default(),
         };
         Light::new(world, Shared::new(Brightness { sky: 1.0, sun: 1.0, glow: 0.0 })).on_voxel(0, ground(1, 0))
     };

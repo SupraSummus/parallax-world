@@ -100,7 +100,7 @@ fn world(make: Make, cell: i64) -> World {
     );
     let generator = Generator { kinds: KINDS.to_vec(), seed: 5, layers: vec![Layer::Field(ground), Layer::Population(things)] };
     // Room over what stands on the ground for a site of the coarsest level, as a coarse site's share may reach past it (docs/todo.md).
-    World { generator, spawn: [0; 3], heights: Some((-64, 128)), points: Vec::new() }
+    World { generator, spawn: [0; 3], heights: Some((-64, 128)), points: Vec::new(), edits: Default::default() }
 }
 
 const LEVELS: u32 = 5;

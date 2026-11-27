@@ -15,6 +15,20 @@ is stopped by walls and trunks, steps up and down what is half a metre high,
 jumps (Space) and sneaks (Shift);
 it walks through plants and water, as each world marks its kinds.
 
+**Cutting** – C takes a stroke where the camera looks,
+within 3 m (`native/src/cut.rs`):
+what lies within a quarter metre of the voxel it meets
+is taken out of the world, at every level of detail.
+Strokes one after another cut deeper, and a notch as an axe cuts one.
+What a stroke leaves standing on nothing, or too weak to stand,
+falls once statics finds it, a second or two on, as a rigid body
+([statics.md](statics.md), "In the engine"):
+a tree cut through topples if it leans past its stump,
+or if notched first on the side it is to fall to,
+and lies where it lands or is caught, its leaves with it.
+The lattice never moves: matter moves between its sites.
+The voxels engine shows it; the chunks engine does not.
+
 **Drawing** – Rays go through the voxels, from one to the next across
 their faces, each level of detail as far as it is held around the eye,
 then the next coarser.

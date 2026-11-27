@@ -698,6 +698,11 @@ fn shown_of(contents: &Contents, b: &Box3, up: usize) -> Box3 {
  * checking a box made whole against its parts.
  */
 pub fn generate_shown(generator: &Generator, b: &Box3, level: u32, up: usize) -> VoxelGrid {
+    generate_edited(generator, b, level, up, |_| {})
+}
+
+/** As `generate_shown`, `edit` done to its sites before they are buried, as a world's Edits are (tiles.rs's `make_sites`). */
+pub fn generate_edited(generator: &Generator, b: &Box3, level: u32, up: usize, edit: impl FnOnce(&mut VoxelGrid)) -> VoxelGrid {
     // Its parts are asked what they hold throughout of what it holds, asked once.
     let contents = Contents::of(generator, &b.widen(1), level);
     let part = shown_of(&contents, b, up);
@@ -716,6 +721,7 @@ pub fn generate_shown(generator: &Generator, b: &Box3, level: u32, up: usize) ->
         let colour = Palette::new(&generator.kinds, generator.seed).colour(kind, s, b.min.map(|v| v * s));
         grid.on_rock(up, |site| floors.floor(site), colour.map(|c| c as u16));
     }
+    edit(&mut grid);
     grid.bury();
     grid
 }

@@ -736,8 +736,35 @@ Numbers are for the forest at 1280×800, as measured when written.
     a baseline per place and level would do for a test with a quarter's slack.
   - `docs/generators.md` holds the worlds beside the engine ("Composing").
 
+## Statics and falling
+
+- **What hangs under a cut holds it up.**
+  A cut bears what is over it, so what lies lower is held (`native/src/fall.rs`):
+  a branch cut at its foot whose tip droops lower stays, held by its tip.
+- **Statics looks only near a cut, at level 0.**
+  10 m across and 30 m up; past 150 000 cells it gives up,
+  as on a hillside rising over the cut. Far off nothing is settled.
+- **What falls is not settled again where it lies**,
+  and pieces falling at once do not meet.
+- **An edit is lit again a tile around it**;
+  a shadow cast farther stays till the world is lit anew.
+- **All that bears is wood.** Worlds give no materials.
+
 ## Ideas
 
+- Matter that moves by itself, not rigid bodies (`native/src/motion.rs`).
+  Each voxel's matter with its speed, bound to its neighbours across faces
+  by what bears stretch, shear, bending and twist, each with a strength;
+  a body falling, breaking as it lands, sand pouring, all one model,
+  and statics its rest.
+  Stiff matter wants steps of 10⁻⁵ s taken explicitly;
+  position-based dynamics (XPBD) takes 1/240 s,
+  but long members sag unless solved many rounds.
+- A cell's stiffness from the continuum (`statics/`).
+  A cell's 15 beams with a section fitted (`SECTION`)
+  could be a 36×36 stiffness of its faces, from E and ν,
+  coarser levels condensed from finer ones exactly, nothing fitted;
+  what it bears read from its stress, against its strengths.
 - A population's N (`Population::cell`) does four things now its points are given:
   the spacing of its default points (`make`), its default `size` (2N),
   how far off a ground it may stand (`on`), and the scale checks look for it at.

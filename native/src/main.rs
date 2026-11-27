@@ -8,10 +8,13 @@
 //! camera a frame at a time till it ends (App::end); then the keys steer,
 //! or, headless, it ends too.
 
+mod cut;
 mod engine;
 mod eye;
+mod fall;
 mod gpu;
 mod inspect;
+mod motion;
 mod threads;
 mod view;
 mod window;
@@ -242,6 +245,8 @@ struct View {
     walker: Option<Walker>,
     /** Whether the window tells of the voxel under the pointer (inspect.rs), as the voxels engine finds it. */
     inspecting: bool,
+    /** What cuts bring down (fall.rs). */
+    falls: fall::Falls,
 }
 
 impl View {
@@ -252,6 +257,7 @@ impl View {
         let day = Shared::new(Brightness { sky: 1.0, sun: 1.0, glow: 0.0 });
         let shared = args.light.and_then(|light| light.on(&day)).unwrap_or(day.clone());
         let world = World::new(made, Some(shared.clone()), args.threads.unwrap_or_else(threads::cores));
+        let falls = fall::Falls::new(world.world().clone());
         let mut view = View {
             kind: args.engine,
             engine: args.engine.make(&world),
@@ -265,6 +271,7 @@ impl View {
             speed: args.speed,
             walker: None,
             inspecting: false,
+            falls,
         };
         view.apply(args);
         view
@@ -351,6 +358,22 @@ impl View {
             }
             look.camera[1] += held[2] * step;
         }
+    }
+
+    /**
+     * A stroke where it looks (cut.rs): what it meets taken out of the
+     * world, and what that brings down asked of statics (fall.rs).
+     * Whether it took anything.
+     */
+    fn cut(&mut self) -> bool {
+        let [_, _, forward] = view_basis(self.look.yaw, self.look.pitch);
+        let cut = cut::stroke(&self.world.level(0).grids, self.look.camera, forward);
+        let before = self.world.world().edits.sites();
+        let took = self.world.take_out(cut.iter().copied());
+        if took {
+            self.falls.post(fall::Job { cut, before });
+        }
+        took
     }
 
     /** The panel's part that sets it. */
@@ -558,13 +581,16 @@ impl window::Content for App {
             ui.heading("Parallax");
             ui.label(&self.stats);
             ui.label(format!("{} tiles being made", self.view.world.making()));
+            if !self.view.falls.told.is_empty() || self.view.falls.waiting > 0 {
+                ui.label(format!("{}{}", self.view.falls.told, if self.view.falls.waiting > 0 { " (finding what falls…)" } else { "" }));
+            }
             self.view.panel(ui);
             let t = self.times;
             ui.label(format!(
                 "frame {:.1} ms: ui {:.1} (the engine's frame {:.1}), upload {:.1}, waiting for the GPU {:.1}, the rest {:.1}",
                 t.since, t.ui, self.framing, t.upload, t.waiting, t.rest
             ));
-            ui.label("WASD, Space/Shift, arrows or drag\nWalking: Space jumps, Shift sneaks\nI: the voxel under the pointer");
+            ui.label("WASD, Space/Shift, arrows or drag\nWalking: Space jumps, Shift sneaks\nI: the voxel under the pointer\nC: cut where you look");
         });
         egui::CentralPanel::default().frame(egui::Frame::NONE).show(ui, |ui| {
             let (rect, response) = ui.allocate_exact_size(ui.available_size(), egui::Sense::drag());
@@ -582,6 +608,9 @@ impl window::Content for App {
             });
             if ui.input(|i| i.key_pressed(egui::Key::I)) {
                 self.view.inspecting = !self.view.inspecting;
+            }
+            if ui.input(|i| i.key_pressed(egui::Key::C)) {
+                self.view.cut();
             }
             // Where the pointer is on the picture, as a share of its sides, while what its ray meets is told of.
             let telling = self.view.inspecting && self.view.kind == Kind::Voxels && !response.dragged();
@@ -687,6 +716,7 @@ impl App {
             view.look.size = size;
         }
         view.light_look();
+        let falling = view.falls.falling(&mut view.world);
         let start = Instant::now();
         let frame = view.engine.frame(&view.look, &view.world);
         let framed = Instant::now();
@@ -706,7 +736,7 @@ impl App {
             self.sample =
                 Some(Sample { ms: [self.framing, ms(framed, Instant::now()), 0.0, 0.0, 0.0], t: self.steered, camera, owed, still });
         }
-        let more = arrived || frame.busy || view.world.making() > 0;
+        let more = arrived || frame.busy || view.world.making() > 0 || falling;
         (self.picture, self.stats) = (Some(frame.picture), frame.stats);
         let options = format!("{} {}", view.world_args, view.options());
         if let Some((file, start)) = &mut self.recording {

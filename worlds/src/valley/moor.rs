@@ -706,6 +706,7 @@ fn moor_in(seed: u64, lies: Mist) -> World {
         spawn,
         heights: Some(HEIGHTS),
         points: Vec::new(),
+        edits: Default::default(),
     }
 }
 

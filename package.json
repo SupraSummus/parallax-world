@@ -11,7 +11,7 @@
     "wasm": "cargo +nightly-2026-11-21 build -Z build-std=panic_abort,std --profile wasm --target wasm32-unknown-unknown -p parallax-native",
     "bindgen": "cargo run --release -p bindgen",
     "lint": "cargo clippy --workspace --all-targets -- -D warnings && cargo fmt --check",
-    "test": "cargo test --no-fail-fast -p lattice -p bake && cargo test --release --no-fail-fast -p parallax-native -p worldgen -p ground -p light -p worlds -p cheese -- --skip keeps_the_contract:: --skip turned:: --skip even::",
+    "test": "cargo test --no-fail-fast -p lattice -p bake && cargo test --release --no-fail-fast -p statics -p parallax-native -p worldgen -p ground -p light -p worlds -p cheese -- --skip keeps_the_contract:: --skip turned:: --skip even::",
     "test:worlds": "cargo test --release --no-fail-fast -p worlds -p cheese --test checks",
     "check": "pnpm lint && pnpm wasm && pnpm test"
   },

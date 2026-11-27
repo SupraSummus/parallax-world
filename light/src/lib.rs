@@ -425,8 +425,23 @@ impl Shared {
      * the time: freeing it is long.
      */
     pub fn forget(&self, far: impl Fn(usize, [i64; 3]) -> bool) -> Option<Box<dyn Send>> {
+        self.forget_made(|level, made| made.tiles.iter().all(|&key| far(level, key)))
+    }
+
+    /**
+     * Forgets what was made whose any tile `near` says is near an edit
+     * (worldgen's Edits), by level and key, and its light with it: its
+     * sites are made again with the edit carved, and the light around it
+     * found again. Returns what it forgot, as `forget`.
+     */
+    pub fn edited(&self, near: impl Fn(usize, [i64; 3]) -> bool) -> Option<Box<dyn Send>> {
+        self.forget_made(|level, made| made.tiles.iter().any(|&key| near(level, key)))
+    }
+
+    /** Forgets what was made that `gone` says to, by level. */
+    fn forget_made(&self, gone: impl Fn(usize, &Made) -> bool) -> Option<Box<dyn Send>> {
         let mut made = self.made.boxes().lock().expect("made");
-        let gone: Vec<_> = made.extract_if(|&(level, _), made| made.tiles.iter().all(|&key| far(level, key))).collect();
+        let gone: Vec<_> = made.extract_if(|&(level, _), made| gone(level, made)).collect();
         if gone.is_empty() {
             return None;
         }

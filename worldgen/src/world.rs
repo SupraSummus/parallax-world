@@ -8,6 +8,7 @@
 //! sky. Checks look at a world in cubes of the lattice around places, each
 //! within its heights if it has them (`within`).
 
+use crate::edits::Edits;
 use crate::generator::Generator;
 use crate::grid::Box3;
 
@@ -43,6 +44,8 @@ pub struct World {
      * windmill. Found only when asked, as some take a search.
      */
     pub points: Vec<(&'static str, Find)>,
+    /** What its sites hold since it was generated: none as made. */
+    pub edits: Edits,
 }
 
 impl World {

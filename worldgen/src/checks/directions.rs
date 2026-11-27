@@ -327,6 +327,7 @@ mod tests {
             spawn: [0; 3],
             heights: Some((-64, 128)),
             points: Vec::new(),
+            edits: Default::default(),
         }
     }
 
