@@ -746,21 +746,34 @@ Numbers are for the forest at 1280×800, as measured when written.
 - **It is slow.** A forest tree of 3000 cells, 7000 nodes, at level 0
   simulates about six times slower than it falls, on one thread;
   the matrix products could share the cores.
-- **What hangs under a cut holds still.**
-  A cut bears what is over it, so what lies lower holds still (`native/src/fall.rs`):
-  a branch cut at its foot whose tip droops lower stays, held by its tip.
-  The worlds have no ground to hold instead.
-- **Mechanics looks only near a cut**, 10 m across and 30 m up;
-  past `BUDGET` cells at every level it gives up. Far off nothing moves.
+- **What a cut wakes is a rule of thumb** (`Around` in `native/src/fall.rs`):
+  what is over it, near it, as much as `BUDGET` cells.
+  A branch cut at its foot whose tip droops lower stays, held by its tip,
+  and what is farther stays asleep, and may hold up what should fall.
+  What falls depends on what holds it up, which is not local;
+  the coarse levels of one solve over all about the cut could find it.
+- **What is hit wakes only where it is borne on hard**:
+  a stone a log lands on stays put,
+  and a site woken is welded to its neighbours asleep,
+  so a tree hit stands while they sleep.
 - **Loose matter is carried, not simulated**,
   and may be left behind where a cell hops into its site.
 - **A hop that is blocked waits**, and the matter shows a site behind
   where it is, till it is free.
+- **A step is solved to a share of its momentum** (`TOLERANCE`),
+  so what falls fast is left strained by the solve's error, and may break.
+  Solved to a share of what changes instead,
+  it stalls among loose pieces in contact: the V-cycles fit them badly.
+- **A tree of the forest stands on what bears nothing**:
+  its floor is loose matter metres deep, so a tree cut through falls through it,
+  lands far lower and breaks up, its crown's cells heavy with the leaves they carry,
+  and the solve crawls among the pieces.
+  `native/src/fall/tests.rs` follows its fall, not its landing.
+- **A post toppled off a stump breaks up as it slides off it**,
+  with nothing touching it, before it lands. Why is not known.
 - **A cube's shear at its corners is partly the cube's own**
-  (a trilinear element locks in bending),
-  so a weld judges only the stress across it, not along an edge.
-- **Coarser levels hold more than level 0** (worlds, [mechanics.md](mechanics.md)):
-  a cut that parts level 0 does not part them, so a tree is kept at level 0.
+  (a trilinear element locks in bending):
+  a weld judges shear by the mean over its face, and so not along an edge.
 - **An edit is lit again a tile around it**;
   a shadow cast farther stays till the world is lit anew.
 - **All that bears is wood.** Worlds give no materials.
@@ -772,17 +785,15 @@ Numbers are for the forest at 1280×800, as measured when written.
   a rod a cell thick lying at 45° lies as a staircase,
   its cells meeting at edges, which hold on to nothing,
   so a second fall takes it apart.
-- **A coarser cell's face holds on all or nothing**: read by the most of it,
-  written back to all of it when the cell moves or lets go,
-  so a crack across less of it than half heals (`native/src/fall.rs`).
+- **A cell partly full bends as a full one** of its stiffness ([mechanics.md](mechanics.md)).
+  Its bending from where in its cube what bears lies would make levels agree.
 
 ## Ideas
 
 - Mechanics at several levels at once (`mechanics/`):
   the finer near the cut or the eye, the coarser beyond,
   a coarser cell taking its parts' stiffness, as the solver's levels already do.
-- Mechanics that wakes by itself: whatever is edited, not only cut,
-  and what lands on something, settling it again.
+- Mechanics that wakes by itself: whatever is edited, not only cut.
 - A cell's stiffness from the continuum (`statics/`).
   A cell's 15 beams with a section fitted (`SECTION`)
   could be a 36×36 stiffness of its faces, from E and ν,
