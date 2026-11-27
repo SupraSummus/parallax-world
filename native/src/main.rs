@@ -367,10 +367,9 @@ impl View {
     fn cut(&mut self) -> bool {
         let [_, _, forward] = view_basis(self.look.yaw, self.look.pitch);
         let cut = cut::stroke(&self.world.level(0).grids, self.look.camera, forward);
-        let before = self.world.world().edits.sites();
         let took = self.world.take_out(cut.iter().copied());
         if took {
-            self.falls.post(fall::Job { cut, before });
+            self.falls.post(fall::Job { cut });
         }
         took
     }

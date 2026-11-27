@@ -1,4 +1,5 @@
 use super::*;
+use lattice::HOLDS_ALL;
 
 /** Ground under y = 0; two posts of wood half a metre square and 6 m high, 5 m apart; leaves about the first's top. */
 fn grove() -> worldgen::World {
@@ -23,27 +24,37 @@ fn grove() -> worldgen::World {
 }
 
 /**
+ * How long what a cut sets moving is followed, s: long enough for a post
+ * to settle, and a tree of the forest to fall, not to land, 12 m lower
+ * (docs/todo.md, "A tree of the forest stands on what bears nothing").
+ */
+const SECONDS: f64 = 2.5;
+
+/**
  * Cuts `sites` of `world`, as a stroke does, and simulates what that sets
- * moving till it rests: what each site whose matter changed holds then
- * (not where only what holds on did), and what was found.
+ * moving till it is asleep, or SECONDS: what each site whose matter
+ * changed holds then (not where only what holds on did), and what was
+ * found.
  */
 fn cut(world: &Arc<worldgen::World>, sites: Vec<[i64; 3]>) -> (FastMap<[i64; 3], Held>, String) {
-    let before = world.edits.sites();
     world.edits.change(sites.iter().map(|&s| (s, (Held::default(), 0))));
-    let mut was = Voxels::new(world, &world.edits.sites(), 0);
+    let mut was = View::new(world, &world.edits.sites(), 0);
     let (mut changed, mut found) = (FastMap::default(), String::new());
-    simulate(world.clone(), &Job { cut: sites, before }, &mut |told| match told {
+    let mut tell = |told| match told {
         Told::Frame(_, changes) => changed.extend(changes),
-        Told::Done(f) => found = f,
+        Told::Done(_, f) => found = f,
         Told::Start => {}
-    });
+    };
+    let mut field = Field::new(world.clone());
+    field.cut(sites, &mut tell);
+    while field.matter.time < SECONDS && field.step(&mut tell) {}
     world.edits.change(changed.iter().map(|(&s, &h)| (s, h)));
     (changed.into_iter().filter(|&(s, (held, _))| was.held(s) != held).map(|(s, (held, _))| (s, held)).collect(), found)
 }
 
 /** What `world` holds at `site` now, edits and all. */
 fn now(world: &Arc<worldgen::World>, site: [i64; 3]) -> Kind {
-    Voxels::new(world, &world.edits.sites(), 0).kind(site)
+    View::new(world, &world.edits.sites(), 0).kind(site)
 }
 
 /** Whether `world`'s site `[x, y, z]` and the one over it are joined now: each holds on across the face between them, +y and −y. */
@@ -104,7 +115,7 @@ fn a_post_nicked_stands() {
 #[test]
 fn a_tree_of_the_forest_notched_and_cut_through_falls_towards_the_notch() {
     let world = Arc::new((worlds::by_name("forest").expect("forest").make)(12345));
-    let mut voxels = Voxels::new(&world, &world.edits.sites(), 0);
+    let mut voxels = View::new(&world, &world.edits.sites(), 0);
     // The nearest trunk to the spawn: bearing 3 m high and more, with none half a metre to its side.
     let [x0, y0, z0] = world.spawn;
     let foot = (0..80)
@@ -117,7 +128,7 @@ fn a_tree_of_the_forest_notched_and_cut_through_falls_towards_the_notch() {
         })
         .expect("a tree near the spawn");
     let y = foot[1] + m(0.75);
-    let trunk = |y: i64, voxels: &mut Voxels| -> Vec<[i64; 3]> {
+    let trunk = |y: i64, voxels: &mut View| -> Vec<[i64; 3]> {
         let layer = (-8..=8).flat_map(|dx| (-8..=8).map(move |dz| [foot[0] + dx, y, foot[2] + dz]));
         layer.filter(|&s| voxels.kind(s) == Kind::Bearing).collect()
     };
@@ -151,4 +162,56 @@ fn a_tree_of_the_forest_notched_and_cut_through_falls_towards_the_notch() {
     assert!(top(&came) < top(&left), "lower than it stood: {found}");
     let mean = |sites: &[[i64; 3]]| sites.iter().map(lean).sum::<f64>() / sites.len() as f64;
     assert!(mean(&came) > mean(&left) + 8.0, "towards the notch: {} to {}; {found}", mean(&left), mean(&came));
+}
+
+/**
+ * The world is one lattice, a part of it awake: a cut while what another
+ * set moving is still awake wakes into it, and both come to rest as one
+ * motion, each post a site lower.
+ */
+#[test]
+fn a_cut_while_another_moves_wakes_into_what_is_awake() {
+    let world = Arc::new(grove());
+    let other: Vec<[i64; 3]> = layer(8).map(|[x, y, z]| [x + 40, y, z]).collect();
+    world.edits.change(layer(8).chain(other.iter().copied()).map(|s| (s, (Held::default(), 0))));
+    let mut field = Field::new(world.clone());
+    let (mut starts, mut cuts, mut changed) = (0, 0, FastMap::default());
+    {
+        let mut tell = |told| match told {
+            Told::Start => starts += 1,
+            Told::Frame(_, changes) => changed.extend(changes),
+            Told::Done(done, _) => cuts += done,
+        };
+        field.cut(layer(8).collect(), &mut tell);
+        for _ in 0..5 {
+            assert!(field.step(&mut tell), "the first still falls");
+        }
+        field.cut(other, &mut tell);
+        while field.step(&mut tell) {}
+    }
+    assert_eq!((starts, cuts), (1, 2), "one motion, both cuts done");
+    world.edits.change(changed);
+    for x in [1, 41] {
+        assert!((8..48).all(|y| (y == 47) != (now(&world, [x, y, 1]) == Kind::Bearing)), "post at x = {x} a site lower");
+    }
+}
+
+/**
+ * A coarser site holds on across a face by the share of the face's
+ * level-0 pairs joined: a post's cube of level 2 all of it, then less
+ * as sites on it let go, or are cut.
+ */
+#[test]
+fn a_coarser_face_holds_on_by_the_share_of_it_joined() {
+    let world = Arc::new(grove());
+    let mut view = View::new(&world, &world.edits.sites(), 2);
+    let up = 3;
+    assert_eq!(view.joined([0, 2, 0], up), 1.0, "the post's cubes whole");
+    // Of the 16 sites on the cube's top, 4 let go upwards; 2 others are cut over it.
+    let held = view.held([0, 11, 0]);
+    view.change((0..4).map(|x| ([x, 11, 0], (held, HOLDS_ALL & !(1 << up)))));
+    view.change([([0, 12, 1], (Held::default(), 0)), ([1, 12, 1], (Held::default(), 0))]);
+    assert_eq!(view.joined([0, 2, 0], up), 10.0 / 16.0);
+    assert_eq!(view.joined([0, 3, 0], 2), 10.0 / 16.0, "the same face from the other side");
+    assert_eq!(view.kind([0, 3, 0]), Kind::Bearing, "a cube partly cut bears");
 }

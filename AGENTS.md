@@ -134,7 +134,7 @@ native/src/                  # The frontend: egui on winit and wgpu; in browsers
 ├── eye.rs                   # How light shows: the eye adapting, its curve
 ├── inspect.rs               # The voxel under the pointer, as the voxels engine finds it
 ├── cut.rs                   # Cutting: what a stroke where one looks takes out of the world
-├── fall.rs, fall/tests.rs   # What a cut sets moving: mechanics at a level of detail, on a thread
+├── fall.rs, fall/tests.rs   # The world as one lattice, the part awake moving: mechanics on a thread
 ├── engine.rs                # What draws: Engine, Picture, Painter
 └── engine/
     ├── voxels.rs, voxels.wgsl # The voxels engine: rays through the tiles' voxels
