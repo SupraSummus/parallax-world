@@ -668,6 +668,23 @@ impl VoxelGrid {
         }
     }
 
+    /** Has site (x, y, z) hold `held` (worldgen's Edits); nothing, if `held` is the default. Not once buried (`bury`). */
+    pub fn put(&mut self, x: i64, y: i64, z: i64, held: &Held) {
+        // Nothing where nothing is: no brick added for it.
+        let i = match self.slot(x, y, z) {
+            Some(Ok(i)) => i,
+            Some(Err(_)) if *held != Held::default() => self.index(x, y, z).expect("in the box"),
+            _ => return,
+        };
+        let ((alpha, colour), (medium, tint), solid, glow, views, glows) = held;
+        self.pieces.set(i, *alpha, *colour);
+        self.medium.set(i, *medium, *tint);
+        self.solid[i] = *solid;
+        self.glow.set(i, (*glow != [0; 3]).then_some(*glow));
+        self.views.set(i, views.as_ref());
+        self.glows.set(i, *glows);
+    }
+
     /** Site (x, y, z)'s index, its brick added if empty; None outside the box or off the sites. */
     pub fn index(&mut self, x: i64, y: i64, z: i64) -> Option<usize> {
         match self.slot(x, y, z)? {

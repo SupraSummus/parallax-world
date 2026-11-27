@@ -1075,5 +1075,6 @@ pub fn city(seed: u64) -> World {
         spawn,
         heights: Some(HEIGHTS),
         points: Vec::new(),
+        edits: Default::default(),
     }
 }

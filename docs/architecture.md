@@ -70,7 +70,17 @@ Tiles are kept as far around the camera as the engine may ask for them,
 whichever way it looks (`Wants`), and dropped farther:
 `voxels::READ`, as far as its rays read;
 `Lod::grid_reach`, as far as each grid's chunks read.
-A tile never changes once made.
+A tile never changes once made; it may be replaced.
+A world's edits (`worldgen/src/edits.rs`) are what its level-0 sites hold
+since it was generated: nothing where something was cut, matter where it fell.
+A coarser site holds what the level-0 site it is read at holds,
+and every level's sites are made with the edits in (`make_sites`),
+for what draws them and what lights them alike.
+An edit has the tiles it meets made again, at every level,
+shown as they were till they are, then replaced
+(`World::change` in `native/src/world.rs`);
+those a tile or less from it are lit again.
+The chunks engine, which bakes a chunk once, does not see edits.
 Those that read a level's tiles, on their own threads,
 each take them as they were (`Level`, `lattice`'s `Tiles`):
 tables in blocks of tiles, shared between one taking and the next (`Blocks`),
@@ -119,7 +129,7 @@ as large as the pool holds:
 short of slots, all shrink, every level read less far,
 and with room to spare they grow back.
 The pool is bounded; what does not fit shows coarser, sooner.
-Tiles never change once made, and are packed for the GPU where they are made,
+Tiles never change once made (an edit replaces them), and are packed for the GPU where they are made,
 so a brick is uploaded once,
 and bricks of a tile holding the same sites (its buried rock) share a slot.
 A brick is unknown, not empty, till its tile is made,

@@ -526,5 +526,6 @@ pub fn cheese(seed: u64) -> World {
         spawn,
         heights: None,
         points: vec![("mine", Box::new(move || gallery.0.gallery(&gallery.1)))],
+        edits: Default::default(),
     }
 }

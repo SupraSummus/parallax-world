@@ -15,7 +15,9 @@
 //! camera than the engine may ask for (Wants's reach) are dropped, and
 //! the light's with them (worldgen's Shared). A tile
 //! never changes, so a chunk baked once all the tiles it reads are in
-//! stays right whatever comes after (lattice's Tiles). Given light (worldgen's Shared),
+//! stays right whatever comes after (lattice's Tiles), but for an edit
+//! (`change`): that replaces the tiles it meets, made again as of it,
+//! which the voxels engine reads, the chunks engine not. Given light (worldgen's Shared),
 //! the bakers' Lights read its tiles, each site as it is, where
 //! they read them. Asked for light, for the voxels engine
 //! (voxels.rs), the bricks of tiles made that its rays asked for are lit,
@@ -31,8 +33,9 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use lattice::GRID_LEVELS;
 pub use lattice::TileId;
-use lattice::{ALPHA, BRICK, BRICK_SITES, Blocks, FastSet, Grid, Tiles, alpha_of, medium};
+use lattice::{ALPHA, BRICK, BRICK_SITES, Blocks, FastMap, FastSet, Grid, Tiles, alpha_of, medium};
 use light::{Light, Shared};
+use worldgen::grid::{Box3, Held};
 use worldgen::tiles::{made_with, make_tiles};
 
 use crate::engine::voxels;
@@ -140,10 +143,10 @@ impl Level {
         Level { tiles, grids }
     }
 
-    /** Takes `tile` as its tile `id`: its voxels are others' than those read so far (`grids`). */
-    fn insert(&mut self, id: TileId, tile: Arc<Tile>) {
+    /** Takes `tile` as its tile `id`: its voxels are others' than those read so far (`grids`). What it held there before, if anything. */
+    fn insert(&mut self, id: TileId, tile: Arc<Tile>) -> Option<Arc<Tile>> {
         Arc::make_mut(&mut self.grids).insert(id, tile.grid.clone());
-        self.tiles.insert(id, tile);
+        self.tiles.insert(id, tile)
     }
 
     /** Lets its tile `id` go, if it has it. */
@@ -254,6 +257,11 @@ enum Order {
     Want { wanted: VecDeque<Job>, lit: bool, gone: Vec<Box<dyn Send>>, level: usize, camera: Vec3, keep: f64 },
     /** Light by this, from now on (World::relight). */
     Relight(Shared),
+    /**
+     * Edit `epoch` changed sites in box `b` (level 0): the light forgets
+     * what it made near them (`lit_near`), before any tile is made as of it.
+     */
+    Edited { epoch: u64, b: Box3 },
 }
 
 /** What the workers tell the thread that draws: pieces taken to make or light, and a piece done. */
@@ -277,6 +285,8 @@ struct Queue {
     lit: bool,
     gone: Vec<Box<dyn Send>>,
     forget: Option<(usize, Vec3, f64)>,
+    /** The last edit read (Order::Edited): a tile made from now on is made as of it. */
+    edited: u64,
 }
 
 impl Queue {
@@ -298,13 +308,20 @@ impl Queue {
                     self.shared = Some(shared);
                     self.lighting += 1;
                 }
+                // Forgotten here, under the queue's lock: no worker takes a tile to make till it is.
+                Order::Edited { epoch, b } => {
+                    if let Some(shared) = &self.shared {
+                        self.gone.extend(shared.edited(|level, key| lit_near(level, b, key.map(|v| v as i32))));
+                    }
+                    self.edited = epoch;
+                }
             }
         }
     }
 }
 
-/** A piece done: a tile made, or a brick lit (its light in its tile). */
-type Made = (usize, Piece, Option<Arc<Tile>>);
+/** A piece done: a tile made, or a brick lit (its light in its tile); and the last edit it was made as of. */
+type Made = (usize, Piece, Option<Arc<Tile>>, u64);
 
 /**
  * The world's tiles as the thread that draws has them: it orders its
@@ -329,6 +346,8 @@ pub struct World {
     /** What it last wanted, but what was taken since; and what was taken, not done yet: as its threads told. */
     wanted: FastSet<(usize, Piece)>,
     in_flight: FastSet<(usize, Piece)>,
+    /** Tiles shown as they were before an edit that meets them, by level and id: the edit, which they are made again as of. */
+    stale: FastMap<(usize, TileId), u64>,
     /** Each worker's clock (own_clock), once it runs. */
     #[cfg(target_os = "linux")]
     clocks: Arc<[OnceLock<libc::clockid_t>]>,
@@ -384,8 +403,8 @@ struct Worker {
     light: Option<(u32, Light)>,
 }
 
-/** A job taken off the queue, and what the queue said then: its light, how many times that changed, and whether it is read. */
-type Taken = (Job, Option<Shared>, u32, bool);
+/** A job taken off the queue, and what the queue said then: its light, how many times that changed, whether it is read, the last edit. */
+type Taken = (Job, Option<Shared>, u32, bool, u64);
 
 impl Worker {
     fn new(world: Arc<worldgen::World>) -> Worker {
@@ -403,10 +422,10 @@ impl Worker {
             q.wanted.retain(|job| !with.contains(&(job.0, job.1)));
         }
         q.in_flight.extend(took.iter().copied());
-        Some(((job, q.shared.clone(), q.lighting, q.lit), took))
+        Some(((job, q.shared.clone(), q.lighting, q.lit, q.edited), took))
     }
 
-    fn make(&mut self, ((level, piece, of), shared, lighting, lit): Taken) -> Vec<Made> {
+    fn make(&mut self, ((level, piece, of), shared, lighting, lit, edited): Taken) -> Vec<Made> {
         match piece {
             Piece::Brick(corner) => {
                 self.light.take_if(|(l, _)| *l != lighting);
@@ -415,7 +434,7 @@ impl Worker {
                     self.light.get_or_insert_with(|| (lighting, Light::new(world.clone(), shared.expect("light to light tiles with"))));
                 // A tile lit anew since (relight) is let go, and this light with it.
                 of.expect("the tile of a brick").lit(level as u32, corner, light);
-                vec![(level, piece, None)]
+                vec![(level, piece, None, edited)]
             }
             Piece::Tile(id) => {
                 let key = id.map(i64::from);
@@ -426,7 +445,7 @@ impl Worker {
                 };
                 let tile = |(key, grid): ([i64; 3], Grid)| {
                     let id = key.map(|v| v as i32);
-                    (level, Piece::Tile(id), Some(Arc::new(Tile::new(Arc::new(grid)))))
+                    (level, Piece::Tile(id), Some(Arc::new(Tile::new(Arc::new(grid)))), edited)
                 };
                 grids.into_iter().map(tile).collect()
             }
@@ -491,6 +510,7 @@ impl World {
                 lit: false,
                 gone: Vec::new(),
                 forget: None,
+                edited: 0,
             };
             let queue = Arc::new(Mutex::new(queue));
             (0..threads)
@@ -521,6 +541,7 @@ impl World {
             early: Vec::new(),
             wanted: FastSet::default(),
             in_flight: FastSet::default(),
+            stale: FastMap::default(),
             #[cfg(target_os = "linux")]
             clocks,
         }
@@ -565,14 +586,52 @@ impl World {
         }
     }
 
+    /** Takes `sites` (level 0) out of the world: `change`, each to hold nothing. */
+    pub fn take_out(&mut self, sites: impl IntoIterator<Item = [i64; 3]>) -> bool {
+        self.change(sites.into_iter().map(|site| (site, Held::default())))
+    }
+
+    /**
+     * Has each of `changes` (level-0 sites) hold what it says (worldgen's
+     * Edits): the tiles they are in, at every level, are made again as of
+     * the edit, shown as they were till they are; those near them
+     * (`lit_near`) are lit again. Returns whether anything changed.
+     */
+    pub fn change(&mut self, changes: impl IntoIterator<Item = ([i64; 3], Held)>) -> bool {
+        let Some((epoch, b)) = self.world.edits.change(changes) else { return false };
+        for (level, tiles) in self.levels.iter_mut().enumerate() {
+            let [lo, hi] = tiles_of(level, b);
+            for id in within([lo.map(|v| v - 1), hi.map(|v| v + 1)]) {
+                let Some(tile) = tiles.tiles.get(id).map(|t| Arc::new(t.unlit())) else { continue };
+                if meets(level, b, id) {
+                    self.stale.insert((level, id), epoch);
+                }
+                Arc::make_mut(tiles).insert(id, tile);
+            }
+        }
+        self.orders.send(Order::Edited { epoch, b });
+        true
+    }
+
+    /** The world its threads make, with its edits. */
+    pub fn world(&self) -> &Arc<worldgen::World> {
+        &self.world
+    }
+
+    /** Whether it shows a tile as it was before an edit, to make again. */
+    pub fn editing(&self) -> bool {
+        !self.stale.is_empty()
+    }
+
     /** Tiles being made and bricks lit, or waiting to be. */
     pub fn making(&self) -> usize {
         self.wanted.len() + self.in_flight.len()
     }
 
-    /** Whether it lacks a tile `wants` asks for. */
+    /** Whether it lacks a tile `wants` asks for, or shows one as it was before an edit. */
     pub fn lacks(&self, wants: &Wants) -> bool {
-        wants.asked.iter().any(|&(level, piece)| matches!(piece, Piece::Tile(id) if self.levels[level].tiles.get(id).is_none()))
+        !self.stale.is_empty()
+            || wants.asked.iter().any(|&(level, piece)| matches!(piece, Piece::Tile(id) if self.levels[level].tiles.get(id).is_none()))
     }
 
     /** What it owes the view, as its threads last told: the tiles to make and the bricks to light, waiting or under way. */
@@ -645,13 +704,22 @@ impl World {
         }
         let far = |level: usize, id: TileId| far(level, camera, keep(level), id);
         let mut gone: Vec<Box<dyn Send>> = Vec::new();
-        for (level, piece, tile) in made {
+        for (level, piece, tile, edited) in made {
             let (Piece::Tile(id), Some(tile)) = (piece, tile) else { continue };
-            // Made with one asked for, a tile may be far, or here already: that one is kept, with its light.
-            if far(level, id) || self.levels[level].tiles.get(id).is_some() {
+            // Made with one asked for, a tile may be far, or here already: that one is kept, with its light; but
+            // one shown as it was before an edit gives way to one made as of it, and one made before it is made again.
+            let replaces = match self.stale.get(&(level, id)) {
+                Some(&edit) if edited >= edit => {
+                    self.stale.remove(&(level, id));
+                    true
+                }
+                Some(_) => false,
+                None => self.levels[level].tiles.get(id).is_none(),
+            };
+            if far(level, id) || !replaces {
                 gone.push(Box::new(tile));
             } else {
-                Arc::make_mut(&mut self.levels[level]).insert(id, tile);
+                gone.extend(Arc::make_mut(&mut self.levels[level]).insert(id, tile).map(|was| Box::new(was) as Box<dyn Send>));
                 changed = true;
             }
         }
@@ -659,12 +727,22 @@ impl World {
         self.sweeping = (level + 1) % GRID_LEVELS;
         let dropped: Vec<TileId> = self.levels[level].tiles.iter().map(|(id, _)| id).filter(|&id| far(level, id)).collect();
         if !dropped.is_empty() {
+            for &id in &dropped {
+                self.stale.remove(&(level, id));
+            }
             let tiles = Arc::make_mut(&mut self.levels[level]);
             gone.extend(dropped.into_iter().filter_map(|id| tiles.remove(id)).map(|tile| Box::new(tile) as Box<dyn Send>));
             changed = true;
         }
 
         let (mut list, mut listed) = (VecDeque::new(), FastSet::default());
+        // Tiles shown as they were before an edit first: what was cut is near, and nothing else asks for them.
+        for &(level, id) in self.stale.keys() {
+            let piece = (level, Piece::Tile(id));
+            if !self.in_flight.contains(&piece) && listed.insert(piece) {
+                list.push_back((level, piece.1, None));
+            }
+        }
         let unlit = |tile: &Tile, [x, y, z]: [i32; 3]| usize::try_from(tile.grid.brick(x, y, z)).is_ok_and(|f| tile.light(f).is_none());
         for &(level, piece) in asked.iter() {
             let tiles = &self.levels[level].tiles;
@@ -687,6 +765,28 @@ impl World {
         self.orders.send(Order::Want { wanted: list, lit: lit != Lit::Not, gone, level, camera, keep: keep(level) });
         changed
     }
+}
+
+/** The tiles of `level` box `b` of level-0 sites meets, from first to last: those it reads them at. */
+fn tiles_of(level: usize, b: Box3) -> [TileId; 2] {
+    let tile = |v: i64| v.div_euclid(1 << level).div_euclid(TILE) as i32;
+    [b.min.map(tile), b.max.map(|v| tile(v - 1))]
+}
+
+/** Whether tile `id` of `level` holds any site of box `b` (level 0). */
+fn meets(level: usize, b: Box3, id: TileId) -> bool {
+    let [lo, hi] = tiles_of(level, b);
+    (0..3).all(|d| (lo[d]..=hi[d]).contains(&id[d]))
+}
+
+/**
+ * Whether tile `id` of `level` is near box `b` (level 0), a tile or less
+ * away: lit anew after an edit there. The light from farther, a shadow
+ * cast past it, is as it was, till lit anew (World::relight).
+ */
+fn lit_near(level: usize, b: Box3, id: TileId) -> bool {
+    let [lo, hi] = tiles_of(level, b);
+    (0..3).all(|d| (lo[d] - 1..=hi[d] + 1).contains(&id[d]))
 }
 
 /** Whether tile `id` of `level` is far enough from the camera (lattice units) to drop, kept within `keep` (World::update). */
@@ -764,6 +864,54 @@ mod tests {
                     assert_eq!(at.get(&other), Some(&d), "{id:?} and {other:?}");
                 }
             }
+        }
+    }
+
+    /** Red ground under y = 0. */
+    fn ground() -> worldgen::World {
+        use worldgen::generator::{Field, Generator, KindDef, Layer, Op};
+        let kinds = vec![KindDef { name: "ground", kind_type: 10, colors: &["#ff0000"], walk_through: false, glows: false, medium: false }];
+        let ground = Field::at("ground", 0.0, Op::Fill, |_, y, _| (y < 0).then_some((0, None)));
+        let generator = Generator { kinds, seed: 1, layers: vec![Layer::Field(ground)] };
+        worldgen::World { generator, spawn: [0; 3], heights: Some((-64, 64)), points: Vec::new(), edits: Default::default() }
+    }
+
+    /** Has `world` make the tiles of levels 0 to 2 a tile around the origin, and what it owes. */
+    fn made(world: &mut World, lit: Lit) {
+        let reach = std::array::from_fn(|l| (l <= 2).then_some(TILE as f64));
+        let mut wants = Wants { reach, lit, asked: Arc::default() };
+        loop {
+            world.update([0.0; 3], &wants);
+            let asked: Vec<_> =
+                (0..=2).flat_map(|l| world.lacking(l, TILE as f64, [0.0; 3]).into_iter().map(move |id| (l, Piece::Tile(id)))).collect();
+            if asked != *wants.asked {
+                wants.asked = Arc::new(asked);
+            } else if world.making() == 0 {
+                break;
+            } else {
+                world.wait();
+            }
+        }
+    }
+
+    #[test]
+    fn a_site_taken_out_is_gone_from_the_tiles_of_every_level_that_reads_it() {
+        use light::Brightness;
+        let day = Brightness { sky: 1.0, sun: 1.0, glow: 0.0 };
+        for (shared, lit) in [(None, Lit::Not), (Some(Shared::new(day)), Lit::Bricks)] {
+            let mut world = World::new(ground(), shared, 2);
+            made(&mut world, lit);
+            let at = |world: &World, level: usize, [x, y, z]: [i32; 3]| world.level(level).grids.at(x, y, z).expect("made");
+            // Level 1 reads its sites at even ones, level 2 at 4p + 1: [5, -3, 5] for [1, -1, 1].
+            let (site, at_2) = ([5, -3, 5], [1, -1, 1]);
+            assert!(at(&world, 0, site) != 0 && at(&world, 2, at_2) != 0, "ground");
+            assert!(world.take_out([site.map(i64::from)]));
+            assert!(!world.take_out([site.map(i64::from)]), "taken out already");
+            made(&mut world, lit);
+            assert_eq!(at(&world, 0, site), 0, "{lit:?}: cut at level 0");
+            assert!(at(&world, 1, [2, -2, 2]) != 0 && at(&world, 1, [3, -2, 3]) != 0, "{lit:?}: level 1 reads it for none");
+            assert_eq!(at(&world, 2, at_2), 0, "{lit:?}: cut at level 2");
+            assert!(at(&world, 0, [5, -3, 6]) != 0, "{lit:?}: its neighbour kept");
         }
     }
 

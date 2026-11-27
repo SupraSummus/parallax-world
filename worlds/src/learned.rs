@@ -547,6 +547,7 @@ pub fn learned(seed: u64) -> World {
         spawn,
         heights: Some(forest::HEIGHTS),
         points: vec![("settlement", first)],
+        edits: Default::default(),
     }
 }
 

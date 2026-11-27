@@ -9,6 +9,7 @@ pub mod build;
 pub mod checks;
 pub mod cost;
 pub mod curve;
+pub mod edits;
 pub mod entry;
 pub mod frame;
 pub mod generator;

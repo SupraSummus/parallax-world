@@ -13,8 +13,9 @@
 //! rest. The levels' balls share a radius, as large as the pool holds
 //! (Windows). Beside it, which cubes of bricks, octree cells above
 //! them, no voxel meets (CELLS): rays go across those at once. Tiles
-//! never change once made, so a brick is uploaded once, and its slot
-//! freed as it leaves its ball.
+//! never change once made, only are replaced (an edit, a relight), so a
+//! brick is uploaded once, and its slot freed as it leaves its ball or
+//! its tile is replaced.
 //!
 //! The windows are kept on a thread of their own (Keeper), which a draw
 //! hands a task and takes a patch from: what the GPU holds of them is a

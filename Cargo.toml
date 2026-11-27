@@ -1,10 +1,10 @@
 # The Rust crates, built and checked together with one lock and one target.
 # lab/ is a member, for the lock, but no default one: cargo test leaves its
-# tests out, and pnpm lint checks it (--workspace); web/bindgen/ and statics/ likewise.
+# tests out, and pnpm lint checks it (--workspace); web/bindgen/ likewise.
 [workspace]
 resolver = "3"
 members = ["lattice", "bake", "worldgen", "ground", "light", "worlds", "worlds/cheese", "native", "web/bindgen", "lab", "statics"]
-default-members = ["lattice", "bake", "worldgen", "ground", "light", "worlds", "worlds/cheese", "native"]
+default-members = ["lattice", "bake", "worldgen", "ground", "light", "worlds", "worlds/cheese", "statics", "native"]
 
 # Debug builds keep files and lines, for panics and profiles, but no
 # variables: about half the size on disk.
