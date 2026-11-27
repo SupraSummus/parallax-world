@@ -213,14 +213,18 @@ So each byte a site keeps costs time too.
 Forgotten brick by brick, not tile by tile,
 a flight held a tenth less and owed twice the bricks.
 What a site keeps is, most first:
-room for each of its rounds, 40 bytes each (`ROUNDS`);
+room for its rounds, 40 bytes each;
 the sites met that reflect, thirty or so, 8 bytes each (`Reflects`);
 what comes to it (`Paths`);
 and its settled light, of half the sites.
 A site that stops no light keeps only its settled light (`Room`):
 nothing reflects on it, so none reads its rounds.
-What a site's light is found from, and its rounds, is one allocation,
-one pointer from its cube (`Site`).
+What a site's light is found from, and its first four rounds, is one allocation,
+one pointer from its cube (`Site`);
+four in five sites settle by then,
+and the room for the rest is made when the first of them is kept (`FIRST_ROUNDS`).
+With room for all, about half of it went unused,
+and a forest's or a valley's first view held a fifteenth more.
 All of it is in 16 bits a channel (`Packed`): half of what floats took,
 a hundredth of a view's pixels one step of colour off for the rounds,
 another for the settled light.
@@ -230,11 +234,19 @@ Kept in a vector under a lock, grown a round at a time,
 each read took the lock and a pointer more,
 and each round a reallocation, often by a thread other than the one that made it:
 the forest's and the valley's first views took two fifths more work,
-and held a fourteenth less; of the room for rounds, about half is used.
+and held a fourteenth less.
 
 Most of lighting's own time is reading:
 the world's sites the lines meet,
-and the rounds of the sites met that reflect, each a few cache lines away.
+and the rounds of the sites met that reflect, each a few cache lines away;
+and finding where each is, its tile and its cube,
+as much work again as reading it.
+So what is read again soon is read once:
+the coarser sites a site's lines hand over to, once a site,
+each in a room by where it is (`Work`, `Near`):
+a forest's 55 reads were of 17, each found again;
+and a site a line comes into by two faces, once,
+where it looks alike through all (most do; `VoxelGrid::light_through`).
 Tried, and no faster:
 the sites lines met last kept by where (a quarter to a third met again);
 a grid's alpha and colour of a site kept together;
@@ -243,8 +255,9 @@ the sites met that reflect kept by site, so that each is read once a round
 under half as many reads, as many cache misses;
 a tile forgotten keeping its sites' settled light:
 what is lit again is mostly what that light is found from;
-the coarser sites a site's lines hand over to read once a site
-(a forest's 55 reads were of 17): read again so soon, they are still cached.
+a site that stops nothing and glows nothing seen without its floats worked out;
+the light coming in a site's last round worked out once,
+not again to keep: a hundredth fewer instructions.
 
 Native's light sliders light the world anew (`World::relight`),
 as slowly as at the start.

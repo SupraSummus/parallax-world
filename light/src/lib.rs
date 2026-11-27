@@ -160,6 +160,8 @@ const TOLERANCE: f32 = 1e-2;
  * (docs/light.md).
  */
 const ROUNDS: usize = 8;
+/** Rounds a site keeps room for with it (Site): most settle by then. */
+const FIRST_ROUNDS: usize = 4;
 /**
  * Sites of a level begun between one forgetting of its tiles and the next
  * (Shared::begun): fewer hold less, and under what a view reads at once,
@@ -197,6 +199,22 @@ type Sites = [Room; CUBE_SITES];
  * all its cube's (docs/light.md).
  */
 const CUBE: i64 = 4;
+/**
+ * The tile a site's coordinate is in, and the coarser site's: TILE and 2
+ * powers of two, so Euclid's division by them is a shift, which the
+ * compiler does not make of `div_euclid`, and is in every lookup.
+ */
+const TILE_SHIFT: u32 = TILE.trailing_zeros();
+const _: () = assert!(TILE == 1 << TILE_SHIFT);
+
+fn tile_of(site: [i64; 3]) -> [i64; 3] {
+    site.map(|v| v >> TILE_SHIFT)
+}
+
+fn coarse(site: [i64; 3]) -> [i64; 3] {
+    site.map(|v| v >> 1)
+}
+
 /** Cubes a tile is a side, and in all; sites a cube holds. */
 const SIDE: i64 = TILE / CUBE;
 const TILE_CUBES: usize = (SIDE * SIDE * SIDE) as usize;
@@ -210,8 +228,9 @@ impl Made {
     }
 
     /** What is kept of `site`, one of its tiles': its tile marked read. */
+    #[inline]
     fn room(&self, site: [i64; 3]) -> &Room {
-        let tile = (site[1].div_euclid(TILE) - self.tiles[0][1]) as usize;
+        let tile = (tile_of(site)[1] - self.tiles[0][1]) as usize;
         let lit =
             self.lit[tile].get_or_init(|| Arc::new(Lit { read: AtomicBool::new(false), cubes: std::array::from_fn(|_| OnceLock::new()) }));
         // Written only when it changes: Lights reading the same tile do not take the mark from each other.
@@ -266,8 +285,34 @@ struct Site {
     /**
      * The light on each of its faces in each round (`round`): each kept
      * once found, the same whoever finds it, so read without a lock.
+     * The first FIRST_ROUNDS with it, the rest in room made when the
+     * first of them is kept.
      */
-    rounds: [OnceLock<[Packed; F]>; ROUNDS + 1],
+    first: [OnceLock<[Packed; F]>; FIRST_ROUNDS],
+    later: OnceLock<Box<[OnceLock<[Packed; F]>; ROUNDS + 1 - FIRST_ROUNDS]>>,
+}
+
+impl Site {
+    /** Its paths, and no rounds yet. */
+    fn new(paths: Paths) -> Site {
+        Site { paths, first: Default::default(), later: OnceLock::new() }
+    }
+
+    /** Its round `n`, if kept. */
+    fn round(&self, n: usize) -> Option<&[Packed; F]> {
+        match n.checked_sub(FIRST_ROUNDS) {
+            None => self.first[n].get(),
+            Some(later) => self.later.get()?[later].get(),
+        }
+    }
+
+    /** Keeps `on` as its round `n`, unless another Light kept it meanwhile: the same. */
+    fn keep(&self, n: usize, on: [Packed; F]) {
+        _ = match n.checked_sub(FIRST_ROUNDS) {
+            None => self.first[n].set(on),
+            Some(later) => self.later.get_or_init(Box::default)[later].set(on),
+        };
+    }
 }
 
 /** What is made, by level and the key of its first tile. */
@@ -493,24 +538,28 @@ impl Level {
     }
 
     /** What the tile of this level, `i`, of `world`, that holds `site` is made in, from those shared. */
+    #[inline]
     fn made(&mut self, world: &World, shared: &Shared, i: usize, site: [i64; 3]) -> &Made {
-        let forgotten = shared.forgotten[i].load(Ordering::Relaxed);
+        let (forgotten, key) = (shared.forgotten[i].load(Ordering::Relaxed), tile_of(site));
+        let at = match self.last {
+            Some((k, at)) if k == key && forgotten == self.forgotten => at,
+            _ => self.read(world, shared, i, key, forgotten),
+        };
+        &self.held[at]
+    }
+
+    /** Where in `held` tile `key` of this level, `i`, is: asked for if not yet; all let go first if any was forgotten since. */
+    #[cold]
+    fn read(&mut self, world: &World, shared: &Shared, i: usize, key: [i64; 3], forgotten: usize) -> usize {
         if forgotten != self.forgotten {
             *self = Level { forgotten, ..Level::new(self.heights) };
         }
-        let key = site.map(|v| v.div_euclid(TILE));
-        let at = match self.last {
-            Some((k, at)) if k == key => at,
-            _ => {
-                let at = *self.read.entry(key).or_insert_with(|| {
-                    self.held.push(shared.made(world, i as u32, key));
-                    self.held.len() - 1
-                });
-                self.last = Some((key, at));
-                at
-            }
-        };
-        &self.held[at]
+        let at = *self.read.entry(key).or_insert_with(|| {
+            self.held.push(shared.made(world, i as u32, key));
+            self.held.len() - 1
+        });
+        self.last = Some((key, at));
+        at
     }
 }
 
@@ -575,6 +624,69 @@ struct Around {
     touching: [bool; F],
 }
 
+/**
+ * What `begin` works in, kept from one site to the next: one for each
+ * begin under way, as a line's hand-over may begin another site's light.
+ * The sites met that reflect, as it finds them; the coarser sites its
+ * lines hand over to (`coarser`), each read once, as the lines of most
+ * directions hand over to the same few.
+ */
+struct Work {
+    reflects: Vec<Reflects>,
+    near: Box<[Near; NEAR]>,
+}
+
+/**
+ * A coarser site's room in Work: how open it is and its light, once read.
+ * Rooms go by where a site is, modulo NEAR_SIDE along each axis, so any
+ * NEAR_SIDE a side together have rooms of their own; a site farther off
+ * takes one's room, and that one is read again if asked for. What is
+ * kept of a site is the world's alone, so no room is ever wrong.
+ */
+#[derive(Clone, Copy, Default)]
+struct Near {
+    site: Option<[i64; 3]>,
+    open: Option<f32>,
+    light: Option<[Packed; N]>,
+}
+
+const NEAR_SIDE: i64 = 4;
+const NEAR: usize = (NEAR_SIDE * NEAR_SIDE * NEAR_SIDE) as usize;
+
+impl Work {
+    /** Room for a site's work, nothing in it. */
+    fn clear(&mut self) {
+        self.reflects.clear();
+        self.near.iter_mut().for_each(|near| near.site = None);
+    }
+
+    /** The room of coarser site `site`, its own. */
+    fn near(&mut self, site: [i64; 3]) -> &mut Near {
+        let [x, y, z] = site.map(|v| v & (NEAR_SIDE - 1));
+        let near = &mut self.near[((z * NEAR_SIDE + y) * NEAR_SIDE + x) as usize];
+        if near.site != Some(site) {
+            *near = Near { site: Some(site), ..Near::default() };
+        }
+        near
+    }
+
+    /** How much of what comes through `site`, a coarser site of level `i`, it lets through (Light::open). */
+    fn open(&mut self, light: &mut Light, i: usize, site: [i64; 3]) -> f32 {
+        *self.near(site).open.get_or_insert_with(|| light.open(i, site))
+    }
+
+    /** The light coming to `site`, a coarser site of level `i`, from direction `d`, settled (Light::light). */
+    fn light(&mut self, light: &mut Light, i: usize, site: [i64; 3], d: usize) -> Packed {
+        self.near(site).light.get_or_insert_with(|| light.light(i, site))[d]
+    }
+}
+
+impl Default for Work {
+    fn default() -> Work {
+        Work { reflects: Vec::new(), near: Box::new([Near::default(); NEAR]) }
+    }
+}
+
 /** Per face, the colour of the whole voxel a whole voxel touches across it, none (black) if it touches none; None if it touches none at all, as most sites. */
 type Touches = Option<Box<[Rgb; F]>>;
 
@@ -583,8 +695,8 @@ pub struct Light {
     shared: Shared,
     /** By level, up to a renderer's coarsest grid's (GRID_LEVELS). */
     levels: Vec<Level>,
-    /** `begin`'s sites that reflect, while it finds them: its room kept from one site to the next. */
-    reflecting: Vec<Reflects>,
+    /** What `begin` works in, kept from one site to the next, but those under way. */
+    work: Vec<Work>,
     unit: [[f64; 3]; N],
     /** Per face, how much the light from each direction weighs in the light on it (`on_face`). */
     cosines: [[f32; N]; F],
@@ -626,7 +738,7 @@ impl Light {
         // A world with no heights has no sky: what glows is all its light.
         let (skies, background) = if world.heights.is_some() { (skies, background) } else { ([[0.0; 3]; N], [0.0; 3]) };
         let glow = shared.brightness.glowing() / GLOW_ONE as f32;
-        Light { world, shared, levels, reflecting: Vec::new(), unit, cosines, glow, sky: skies, background }
+        Light { world, shared, levels, work: Vec::new(), unit, cosines, glow, sky: skies, background }
     }
 
     /** Whether a whole voxel, one that lets nothing through, is at `site` of level `i`. */
@@ -661,15 +773,15 @@ impl Light {
         let glowing = self.glow;
         let Some(([x, y, z], grid)) = self.hold(i, site) else { return (enters[0], ([0.0; 3], [0.0; 3]), [0.0; 3]) };
         let stops = |((pieces, _), (medium, _), _): &Seen| medium.iter().map(|&m| *pieces as u32 + m as u32).sum::<u32>();
-        let mut most = (enters[0], grid.light(x, y, z, enters[0]));
-        for &face in &enters[1..] {
-            let next = grid.light(x, y, z, face);
-            if stops(&next) > stops(&most.1) {
-                most = (face, next);
+        let mut most: Option<(usize, Seen)> = None;
+        grid.light_through(x, y, z, enters, |face, next| {
+            if most.is_none_or(|(_, most)| stops(&next) > stops(&most)) {
+                most = Some((face, next));
             }
-        }
-        let (stops, glow) = seen(most.1, glowing);
-        (most.0, stops, glow)
+        });
+        let (face, most) = most.expect("a face");
+        let (stops, glow) = seen(most, glowing);
+        (face, stops, glow)
     }
 
     /** How much of what comes through `site` of level `i` it lets through. */
@@ -687,12 +799,12 @@ impl Light {
         }
         let world = &self.world;
         let sites = &level.made(world, &self.shared, i, site).sites;
-        Some((site, sites.get_or_init(|| make_sites(world, i as u32, site.map(|v| v.div_euclid(TILE))))))
+        Some((site, sites.get_or_init(|| make_sites(world, i as u32, tile_of(site)))))
     }
 
-    /** What is kept of site `p` of level `i`, read by `with`: its tile marked read. */
-    fn room<T>(&mut self, i: usize, p: [i64; 3], with: impl FnOnce(&Room) -> T) -> T {
-        with(self.levels[i].made(&self.world, &self.shared, i, p).room(p))
+    /** What is kept of site `p` of level `i`: its tile marked read. */
+    fn room(&mut self, i: usize, p: [i64; 3]) -> &Room {
+        self.levels[i].made(&self.world, &self.shared, i, p).room(p)
     }
 
     /**
@@ -703,8 +815,8 @@ impl Light {
      * whoever finds it and whoever reads it kept.
      */
     fn light(&mut self, i: usize, p: [i64; 3]) -> [Packed; N] {
-        if let Some(light) = self.room(i, p, |room| room.found.get().map(|found| **found)) {
-            return light;
+        if let Some(found) = self.room(i, p).found.get() {
+            return **found;
         }
         let site = self.site(i, p);
         let (mut on, mut rounds) = (self.round(i, p, 0, &site), 0);
@@ -718,7 +830,7 @@ impl Light {
         }
         let light = self.coming(i, p, rounds, &site.paths).map(pack);
         // Unless another Light found it meanwhile: the same.
-        _ = self.room(i, p, |room| room.found.set(Box::new(light)));
+        _ = self.room(i, p).found.set(Box::new(light));
         light
     }
 
@@ -733,7 +845,7 @@ impl Light {
         if n > 0 {
             for &reflects in &paths.reflects {
                 let (q, d, back) = reflects.site(p);
-                let on = match self.room(i, q, |room| room.site.get().and_then(|site| site.rounds[n - 1].get().copied())) {
+                let on = match self.room(i, q).site.get().and_then(|site| site.round(n - 1)) {
                     Some(on) => unpack(on[back]),
                     None => {
                         let site = self.site(i, q);
@@ -754,13 +866,12 @@ impl Light {
      * reads it kept.
      */
     fn round(&mut self, i: usize, p: [i64; 3], n: usize, site: &Site) -> [Rgb; F] {
-        if let Some(on) = site.rounds[n].get() {
+        if let Some(on) = site.round(n) {
             return on.map(unpack);
         }
         let light = self.coming(i, p, n, &site.paths);
         let on: [Packed; F] = std::array::from_fn(|f| pack(self.on_face(&light, site.paths.touches.as_deref(), f)));
-        // Unless another Light kept it meanwhile: the same.
-        _ = site.rounds[n].set(on);
+        site.keep(n, on);
         on.map(unpack)
     }
 
@@ -769,15 +880,15 @@ impl Light {
      * yet: kept if the site stops light (Room), else for its caller alone.
      */
     fn site(&mut self, i: usize, p: [i64; 3]) -> Arc<Site> {
-        if let Some(site) = self.room(i, p, |room| room.site.get().cloned()) {
-            return site;
+        if let Some(site) = self.room(i, p).site.get() {
+            return site.clone();
         }
         let site = Arc::new(self.begin(i, p));
         if self.open(i, p) == 1.0 {
             return site;
         }
         // Unless another Light began it meanwhile: the same, so either does.
-        self.room(i, p, |room| room.site.get_or_init(|| site).clone())
+        self.room(i, p).site.get_or_init(|| site).clone()
     }
 
     /** What the light of site `p` of level `i` is found from: what comes to it along each direction (Paths), and no rounds yet. */
@@ -788,19 +899,19 @@ impl Light {
             met: std::array::from_fn(|k| self.meets(i, add(p, FACES[k]), ENTERS[k])),
             touching: std::array::from_fn(|k| whole && self.whole(i, add(p, FACES[k]))),
         };
-        let (mut reflects, mut touches): (_, Touches) = (std::mem::take(&mut self.reflecting), None);
-        reflects.clear();
+        let (mut work, mut touches): (Work, Touches) = (self.work.pop().unwrap_or_default(), None);
+        work.clear();
         let comes = std::array::from_fn(|d| {
             // Across a face, a whole voxel touches the next; across an edge, light comes between them.
             if HALVES[d].is_none() && around.touching[d] {
                 touches.get_or_insert_with(|| Box::new([[0.0; 3]; F]))[d] = around.met[d].1.1;
                 return [0; 3];
             }
-            pack(self.along(i, p, &around, d, &mut reflects))
+            pack(self.along(i, p, &around, &mut work, d))
         });
-        let paths = Paths { comes, reflects: reflects.as_slice().into(), touches };
-        self.reflecting = reflects;
-        Site { paths, rounds: Default::default() }
+        let paths = Paths { comes, reflects: work.reflects.as_slice().into(), touches };
+        self.work.push(work);
+        Site::new(paths)
     }
 
     /**
@@ -818,7 +929,7 @@ impl Light {
      * next that, with it, reflects over: that one reflects for both, as if
      * lit alike. What is still owed where the line ends is left out.
      */
-    fn along(&mut self, i: usize, p: [i64; 3], around: &Around, d: usize, reflects: &mut Vec<Reflects>) -> Rgb {
+    fn along(&mut self, i: usize, p: [i64; 3], around: &Around, work: &mut Work, d: usize) -> Rgb {
         let (v, heights, steps) = (DIRECTIONS[d], self.levels[i].heights, self.shared.steps);
         let coarser = i + 1 < self.levels.len();
         // What has come so far, and how much of what comes from further on gets through.
@@ -830,10 +941,10 @@ impl Light {
         let beyond = 'march: {
             for step in 1..=most {
                 let next = add(q, v);
-                let cube = q.map(|c| c.div_euclid(2));
-                let leaves = (0..3).find(|&a| next[a].div_euclid(2) != cube[a]);
-                if let Some(across) = leaves.filter(|_| coarser && step > steps && self.open(i + 1, cube) > 0.0) {
-                    break 'march self.coarser(i + 1, q, across, d);
+                let cube = coarse(q);
+                let leaves = (0..3).find(|&a| coarse(next)[a] != cube[a]);
+                if let Some(across) = leaves.filter(|_| coarser && step > steps && work.open(self, i + 1, cube) > 0.0) {
+                    break 'march self.coarser(i + 1, work, q, across, d);
                 }
                 // The parts of the step, each with its share of the light: across an edge, a site beside it, half
                 // the light each, come in by one face, then the one past it, all of it, by two (ENTERS). Next to
@@ -845,7 +956,7 @@ impl Light {
                     (0..3).for_each(|c| sum[c] += through[c] * share * glow[c]);
                     (0..3).for_each(|c| owed[c] += through[c] * share * alpha[c] * colour[c]);
                     if owed.iter().any(|&r| r > light.shared.tolerance) {
-                        reflects.push(Reflects::new(d, step, part, face, pack(std::mem::take(&mut owed))));
+                        work.reflects.push(Reflects::new(d, step, part, face, pack(std::mem::take(&mut owed))));
                     }
                     alpha.map(|a| share * a)
                 };
@@ -898,13 +1009,13 @@ impl Light {
      * site beside `q` towards it, if it is past `q`'s cube (`through`): so
      * none is read past a wall.
      */
-    fn coarser(&mut self, i: usize, q: [i64; 3], across: usize, d: usize) -> Rgb {
-        let cube = q.map(|c| c.div_euclid(2));
+    fn coarser(&mut self, i: usize, work: &mut Work, q: [i64; 3], across: usize, d: usize) -> Rgb {
+        let cube = coarse(q);
         let axes = [(across + 1) % 3, (across + 2) % 3];
         // Along each axis of the face, the two coarser sites nearest the line, each with its weight.
         let sides = axes.map(|a| {
-            let (first, near) = ((q[a] - 1).div_euclid(2), if q[a] & 1 == 0 { 0.75 } else { 0.25 });
-            [(first, 1.0 - near), (first + 1, near)]
+            let (first, w) = ((q[a] - 1) >> 1, if q[a] & 1 == 0 { 0.75 } else { 0.25 });
+            [(first, 1.0 - w), (first + 1, w)]
         });
         // Along each axis, how much gets through from `q` to the side past its cube: found once, if a site
         // there lets light through.
@@ -914,7 +1025,7 @@ impl Light {
             for (x, wx) in sides[0] {
                 let mut site = cube;
                 (site[axes[0]], site[axes[1]]) = (x, y);
-                let mut open = self.open(i, site);
+                let mut open = work.open(self, i, site);
                 if open > 0.0 {
                     let mut through = 1.0;
                     for (k, a) in axes.into_iter().enumerate().filter(|&(_, a)| site[a] != cube[a]) {
@@ -924,7 +1035,7 @@ impl Light {
                     open *= through;
                 }
                 if open > 0.0 {
-                    let (w, light) = (wx * wy, unpack(self.light(i, site)[d]));
+                    let (w, light) = (wx * wy, unpack(work.light(self, i, site, d)));
                     total += w * open;
                     (0..3).for_each(|ch| sum[ch] += w * open * light[ch]);
                 }

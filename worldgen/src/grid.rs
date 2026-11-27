@@ -376,8 +376,13 @@ impl Sights {
     /** What site `i` stops and shows along face `kind`'s direction, if it has views. */
     #[inline]
     pub fn face(&self, i: usize, kind: usize) -> Option<Sight> {
-        let (first, which) = self.seen.get(i)?;
-        Some(self.sights[*first as usize + which[kind] as usize])
+        self.seen.get(i).map(|seen| self.sight(seen, kind))
+    }
+
+    /** What a site whose views are `seen` stops and shows along face `kind`'s direction. */
+    #[inline]
+    fn sight(&self, &(first, which): &Seen, kind: usize) -> Sight {
+        self.sights[first as usize + which[kind] as usize]
     }
 
     /** Whether site `i` has views. */
@@ -781,17 +786,34 @@ impl VoxelGrid {
      */
     #[inline]
     pub fn light(&self, x: i64, y: i64, z: i64, kind: usize) -> (Stops<u8>, Stops<[u8; 3]>, [u32; 3]) {
-        match self.slot(x, y, z) {
-            Some(Ok(i)) => {
-                let site = self.site(i);
-                let (pieces, glow) = match self.views.face(i, kind) {
-                    Some(pieces) => (pieces, self.glows.get(i).map_or([0; 3], |g| g[kind])),
-                    None => (site.pieces, self.glow.get(i).copied().unwrap_or_default()),
-                };
-                let (pieces, medium) = site.with_medium(pieces);
-                (pieces, medium, glow)
-            }
-            _ => ((0, [0; 3]), ([0; 3], [0; 3]), [0; 3]),
+        let mut light = Default::default();
+        self.light_through(x, y, z, &[kind], |_, seen| light = seen);
+        light
+    }
+
+    /**
+     * How light entering site (x, y, z) by each of faces `kinds` sees it
+     * (`light`), handed to `each` with the face: through the first alone
+     * where it looks alike through all, as a site with no views does (most).
+     */
+    #[inline]
+    pub fn light_through(
+        &self,
+        x: i64,
+        y: i64,
+        z: i64,
+        kinds: &[usize],
+        mut each: impl FnMut(usize, (Stops<u8>, Stops<[u8; 3]>, [u32; 3])),
+    ) {
+        let Some(Ok(i)) = self.slot(x, y, z) else { return each(kinds[0], Default::default()) };
+        let (site, views) = (self.site(i), self.views.seen.get(i));
+        for &kind in if views.is_some() { kinds } else { &kinds[..1] } {
+            let (pieces, glow) = match views {
+                Some(views) => (self.views.sight(views, kind), self.glows.get(i).map_or([0; 3], |g| g[kind])),
+                None => (site.pieces, self.glow.get(i).copied().unwrap_or_default()),
+            };
+            let (pieces, medium) = site.with_medium(pieces);
+            each(kind, (pieces, medium, glow));
         }
     }
 
