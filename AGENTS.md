@@ -115,10 +115,10 @@ worlds/                      # The worlds, on worldgen's and ground's public API
 ├── tests/                   # Its worlds keep the contract and their cost baselines (checks.rs); scenes
 └── examples/                # map, look, check, cost, bench: a world looked at, checked, measured
 mechanics/src/               # Mechanics on the voxels (docs/mechanics.md), driven by native/src/fall.rs
-├── lib.rs                   # Matter: cells welded across faces, contacts; a step; hops between sites
+├── lib.rs                   # Matter: cells welded across faces where both hold on, contacts; a step; hops
 ├── element.rs               # A cell as a finite element: a co-rotated cube of eight nodes
 ├── solve.rs                 # Conjugate gradients, V-cycles over the octree
-└── tests.rs                 # A post dropped, a post toppling, a beam out of a wall
+└── tests.rs                 # A post dropped, a post toppling, posts holding on or not, a beam out of a wall
 statics/                     # Statics, an experiment (docs/statics.md): what stands
 ├── src/                     # Faces and beams (model.rs) on the octree 2^l·Z³ (lattice.rs);
 │                            # a level measured from the one below (gather.rs); the forces (bodies.rs)

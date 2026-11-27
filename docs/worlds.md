@@ -25,7 +25,8 @@ moves: it bends, breaks, falls and lands, all on the voxels
 ([mechanics.md](mechanics.md)):
 a tree cut through topples if it leans past its stump,
 or if notched first on the side it is to fall to,
-and lies where it lands or is caught, its leaves with it.
+and lies where it lands or is caught, its leaves with it,
+lying on what it landed on, not stuck to it.
 The lattice never moves: matter moves between its sites.
 The voxels engine shows it; the chunks engine does not.
 

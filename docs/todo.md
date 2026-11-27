@@ -764,6 +764,17 @@ Numbers are for the forest at 1280×800, as measured when written.
 - **An edit is lit again a tile around it**;
   a shadow cast farther stays till the world is lit anew.
 - **All that bears is wood.** Worlds give no materials.
+- **Worlds give no bodies**: generated matter holds on across every face
+  (`worldgen/src/edits.rs`), so a pile of stones a world draws is one stone.
+  A thing's sites could hold on to each other and not to other things,
+  sand to nothing.
+- **A thin thing that lands turned loses what holds it together**:
+  a rod a cell thick lying at 45° lies as a staircase,
+  its cells meeting at edges, which hold on to nothing,
+  so a second fall takes it apart.
+- **A coarser cell's face holds on all or nothing**: read by the most of it,
+  written back to all of it when the cell moves or lets go,
+  so a crack across less of it than half heals (`native/src/fall.rs`).
 
 ## Ideas
 

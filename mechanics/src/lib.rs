@@ -3,12 +3,16 @@
 //!
 //! Each cell of a level (2^level sites a side) that holds matter is a
 //! finite element: a cube whose corners are nodes (element.rs). Cells that
-//! share a face are welded there, and share its corners (`Weld`); cells
-//! touching only at an edge or a corner hold on by nothing. What the world
-//! holds still holds the corners it is welded at. A weld breaks where the
-//! stress across it passes its strength, and its cells no longer share its
-//! corners. Cells that meet unwelded push apart, and hold against sliding
-//! as far as friction lets them (`Contact`).
+//! share a face, each holding on across it (`Holds`), are welded there,
+//! and share its corners (`Weld`); cells touching only at an edge or a
+//! corner hold on by nothing. What the world holds still holds the corners
+//! it is welded at. A weld breaks where the stress across it passes its
+//! strength, and its cells no longer share its corners. Cells that meet
+//! unwelded push apart, and hold against sliding as far as friction lets
+//! them (`Contact`); they are never welded. Across which faces a cell
+//! holds on is read once, to weld, and kept as its welds are after
+//! (`hold_on`): so what broke lets go, what turned holds on to whichever
+//! neighbours its welds face.
 //!
 //! A step is implicit (backward Euler), all nodes at once (solve.rs), so
 //! matter as stiff as wood takes steps as long as its motion allows: what
@@ -24,7 +28,7 @@ mod element;
 mod solve;
 
 use element::{CORNERS, Element};
-use lattice::{FastMap, FastSet};
+use lattice::{FastMap, FastSet, Holds, opposite};
 use solve::{M3, Solver, System, V3, add, dot, scale, sub, times};
 
 const GRAVITY: f64 = 9.81;
@@ -91,12 +95,17 @@ const REST: f64 = 0.5;
 /** Cells side by side touch; they are taken to meet a little before, so that resting on something is a contact. */
 const TOUCH: f64 = 1.01;
 
-/** A cell holding matter: its site, its mass, its material, what it is. */
+/**
+ * A cell holding matter: its site, its mass, its material, across which
+ * faces it holds on (as given; in Matter, those it is welded across),
+ * what it is.
+ */
 #[derive(Clone, Debug)]
 pub struct Cell<T> {
     pub site: [i64; 3],
     pub mass: f64,
     pub material: Material,
+    pub holds: Holds,
     pub what: T,
 }
 
@@ -139,9 +148,6 @@ struct Contact {
     k: f64,
     t: f64,
 }
-
-/** What a step did: matter moved from one site to another, each a cell. */
-pub type Moves = Vec<(u32, [i64; 3], [i64; 3])>;
 
 /** The sites about a site, across its faces, edges and corners: what it may meet. */
 fn about(s: [i64; 3]) -> impl Iterator<Item = [i64; 3]> {
@@ -192,22 +198,26 @@ impl<T> Matter<T> {
     /**
      * Matter of `cells` at `level`, sites `unit` metres across at level 0,
      * each welded to those across its faces, and to what the world holds
-     * still there (`still`, the material of a site that does not move).
+     * still there (`still`: the material of a site that does not move, and
+     * across which faces it holds on), where both hold on across it.
      */
-    pub fn new(level: u32, unit: f64, cells: Vec<Cell<T>>, still: &mut dyn FnMut([i64; 3]) -> Option<Material>) -> Matter<T> {
+    pub fn new(level: u32, unit: f64, cells: Vec<Cell<T>>, still: &mut dyn FnMut([i64; 3]) -> Option<(Material, Holds)>) -> Matter<T> {
         let h = unit * f64::from(1u32 << level);
         let at: FastMap<[i64; 3], u32> = cells.iter().enumerate().map(|(i, c)| (c.site, i as u32)).collect();
         let mut welds = Vec::new();
         for (i, c) in cells.iter().enumerate() {
-            for s in faces(c.site) {
-                let (j, material) = match at.get(&s) {
-                    Some(&j) if j as usize > i => (Other::Cell(j), cells[j as usize].material),
+            for (f, s) in faces(c.site).enumerate() {
+                let (j, material, holds) = match at.get(&s) {
+                    Some(&j) if j as usize > i => (Other::Cell(j), cells[j as usize].material, cells[j as usize].holds),
                     Some(_) => continue,
                     None => match still(s) {
-                        Some(m) => (Other::Still(s), m),
+                        Some((m, holds)) => (Other::Still(s), m, holds),
                         None => continue,
                     },
                 };
+                if c.holds & (1 << f) == 0 || holds & (1 << opposite(f)) == 0 {
+                    continue;
+                }
                 let corners =
                     (0..8).filter_map(|a| (0..8).find(|&b| corner(c.site, a) == corner(s, b)).map(|b| (a as u8, b as u8))).collect();
                 let d = sub(s.map(|v| v as f64), c.site.map(|v| v as f64));
@@ -282,6 +292,19 @@ impl<T> Matter<T> {
             self.nodes[k].held |= held[p];
         }
         self.welded = self.welds.iter().flat_map(|w| [(w.i, w.j)].into_iter().chain(cell_of(w.j).map(|j| (j, Other::Cell(w.i))))).collect();
+        self.hold_on();
+    }
+
+    /** Each cell holding on across the faces it is welded across to what is there: as its welds and sites are now. */
+    fn hold_on(&mut self) {
+        for i in 0..self.cells.len() {
+            let welded = |s: [i64; 3]| {
+                let other = self.at.get(&s).map_or(Other::Still(s), |&j| Other::Cell(j));
+                self.welded.contains(&(i as u32, other))
+            };
+            let holds = faces(self.cells[i].site).enumerate().filter(|&(_, s)| welded(s)).fold(0, |h, (f, _)| h | 1 << f);
+            self.cells[i].holds = holds;
+        }
     }
 
     /** Where a cell's matter is, metres: its corners' middle. */
@@ -523,9 +546,9 @@ impl<T> Matter<T> {
      * A step of time, as long as lets no node move more than MOVE of a
      * cell, at most LONGEST_STEP: the nodes move, welds past their
      * strength break, matter moves between sites (`hops`). `still` says
-     * which of the world's sites stop matter. What moved where.
+     * which of the world's sites stop matter.
      */
-    pub fn step(&mut self, still: &mut dyn FnMut([i64; 3]) -> bool) -> Moves {
+    pub fn step(&mut self, still: &mut dyn FnMut([i64; 3]) -> bool) {
         let fastest = self.nodes.iter().map(|n| dot_len(n.v)).fold(0.0, f64::max);
         let dt = LONGEST_STEP.min(MOVE * self.h / fastest.max(1e-9));
         self.solve_step(dt, still);
@@ -547,8 +570,7 @@ impl<T> Matter<T> {
      * moves across the face it is past, to a site that holds nothing. Only
      * which site shows it changes; where it is does not.
      */
-    fn hops(&mut self, still: &mut dyn FnMut([i64; 3]) -> bool) -> Moves {
-        let mut moves = Vec::new();
+    fn hops(&mut self, still: &mut dyn FnMut([i64; 3]) -> bool) {
         for i in 0..self.cells.len() {
             let middle = self.middle(i);
             for a in 0..3 {
@@ -566,11 +588,10 @@ impl<T> Matter<T> {
                     self.at.remove(&from);
                     self.at.insert(to, i as u32);
                     self.cells[i].site = to;
-                    moves.push((i as u32, from, to));
                 }
             }
         }
-        moves
+        self.hold_on();
     }
 
     /** Whether it has come to rest. */

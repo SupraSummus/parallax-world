@@ -73,7 +73,8 @@ whichever way it looks (`Wants`), and dropped farther:
 `Lod::grid_reach`, as far as each grid's chunks read.
 A tile never changes once made; it may be replaced.
 A world's edits (`worldgen/src/edits.rs`) are what its level-0 sites hold
-since it was generated: nothing where something was cut, matter where it fell.
+since it was generated: nothing where something was cut, matter where it fell,
+and across which faces that holds on ([mechanics.md](mechanics.md)).
 A coarser site holds what the level-0 site it is read at holds,
 and every level's sites are made with the edits in (`make_sites`),
 for what draws them and what lights them alike.
