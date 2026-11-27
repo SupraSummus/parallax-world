@@ -1,6 +1,7 @@
 # Statics
 
-An experiment (the crate `statics/`, not part of the engine yet):
+The crate `statics/`, at level 0 in the engine after a cut
+("In the engine", below), the rest an experiment:
 does what stands in a world hold, and what falls when it does not?
 A tree cut through at its foot should fall,
 a house should come down with its columns,
@@ -266,6 +267,28 @@ the trunk cut 70 % stood from 0.25 m, cut through from 0.5 m,
 and the slab with a column cut fell at 1 m:
 cells that nest, as the octree's do, part where a finer level's do.
 
+## In the engine
+
+A cut (C) is followed by statics of what stands around it, at level 0,
+on a thread of its own (`native/src/fall.rs`).
+It knows nothing of what things are:
+matter bears (it stops a walking body) or is loose,
+and what bears is all of one material.
+A cut bears what is over it, so what lies lower is held,
+and so is what lies at the edge of what is looked at.
+What stood before the stroke stands, twice as strong as it needed (`as_generated`).
+What falls is decided by the most:
+a cell falls if most of its faces do;
+loose matter goes with the matter that bears nearest it, if most of that fell.
+
+Each joined piece that falls moves as a rigid body (`native/src/motion.rs`):
+under its weight, its surface pushed back by the world's bearing sites, with friction.
+So it topples off a support if its weight lies past the edge, and stays if not:
+a tree cut flat through stands on its stump unless it leans past it,
+and notched on one side first, falls that way.
+The lattice does not move: each pose is sampled onto it,
+matter moving between its sites as edits.
+
 ## Where it is to go
 
 What holds is still whatever is deep in bulk within a radius in metres;
@@ -284,4 +307,3 @@ a finer level's error to it and back (its cells' responses),
 a multigrid the levels already are.
 Only cells whose faces or loads changed need solving,
 from the forces they had.
-What falls is taken off the lattice whole; moving it is not done.

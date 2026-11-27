@@ -498,6 +498,8 @@ fn bodies_of(level: &Level, part: &[Option<usize>], key: &[[i64; 3]]) -> (Vec<us
 pub struct Outcome {
     /// The share of the free mass that fell.
     pub fallen: f64,
+    /// Each node: whether it fell.
+    pub gone: Vec<bool>,
     /// Solves, and their work.
     pub rounds: usize,
     pub work: f64,
@@ -535,7 +537,7 @@ pub fn settle(lattice: &Lattice) -> Outcome {
     }
     let free: f64 = nodes.iter().filter(|v| !v.held).map(|v| v.m).sum();
     let fell: f64 = nodes.iter().zip(&gone).filter(|(_, g)| **g).map(|(v, _)| v.m).sum();
-    Outcome { fallen: if free > 0.0 { fell / free } else { 0.0 }, rounds, work: work.0 }
+    Outcome { fallen: if free > 0.0 { fell / free } else { 0.0 }, gone, rounds, work: work.0 }
 }
 
 /// The share of its strength each bond uses, bearing `force`.

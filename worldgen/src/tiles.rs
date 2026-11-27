@@ -4,7 +4,8 @@
 //! (generate_shown), and parted into the grids hosts draw (`make_tiles`).
 
 use crate::World;
-use crate::generator::generate_shown;
+use crate::edits::{Sites, carve};
+use crate::generator::generate_edited;
 use crate::grid::{BRICK, Box3, Grid, VoxelGrid};
 use crate::world::UP;
 
@@ -49,13 +50,19 @@ pub fn made_with(world: &World, level: u32, key: [i64; 3]) -> impl Iterator<Item
 
 /**
  * The sites of the tiles made with tile `key` of `level` of `world`
- * (`made_with`), as one box, what may show of it (generate_shown).
+ * (`made_with`), as one box, what may show of it (generate_shown), as
+ * its edits have them now (World's `edits`).
  */
 pub fn make_sites(world: &World, level: u32, key: [i64; 3]) -> VoxelGrid {
+    sites_as(world, level, key, &world.edits.sites())
+}
+
+/** As `make_sites`, as `edits` have them: as they were at some time. */
+pub fn sites_as(world: &World, level: u32, key: [i64; 3], edits: &Sites) -> VoxelGrid {
     let heights = world.heights_at(level);
     let boxes = made_with(world, level, key).map(|key| tile_box(heights, key));
     let all = boxes.reduce(|all, b| Box3 { min: all.min, max: b.max }).expect("its own");
-    generate_shown(&world.generator, &all, level, UP)
+    generate_edited(&world.generator, &all, level, UP, |grid| carve(edits, grid, level))
 }
 
 /** The tiles `sites` are of (`make_sites`), by key, as hosts draw them, see-through ones too: each its part. */
@@ -110,6 +117,7 @@ mod tests {
             spawn: [0; 3],
             heights,
             points: Vec::new(),
+            edits: Default::default(),
         };
         for (heights, level) in [(Some((-70, 140)), 0), (Some((-70, 140)), 2), (None, 0)] {
             let world = world(heights);

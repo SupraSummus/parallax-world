@@ -42,7 +42,7 @@ fn wall<const MILLI: u32>(_: u64) -> worldgen::World {
         _ => None,
     });
     let generator = Generator { kinds, seed: 1, layers: vec![Layer::Field(slab)] };
-    worldgen::World { generator, spawn: [0, 0, 0], heights: Some((-64, 64)), points: Vec::new() }
+    worldgen::World { generator, spawn: [0, 0, 0], heights: Some((-64, 64)), points: Vec::new(), edits: Default::default() }
 }
 
 /** What `kind` draws of the world `make` makes, from its spawn, looking along the face (1, 0, 1), without fog: its width and pixels. */
@@ -66,7 +66,7 @@ fn ground(_: u64) -> worldgen::World {
     let kinds = vec![KindDef { name: "ground", kind_type: 10, colors: &["#ff0000"], walk_through: false, glows: false, medium: false }];
     let ground = Field::at("ground", 0.0, Op::Fill, |_, y, _| (y < 0).then_some((0, None)));
     let generator = Generator { kinds, seed: 1, layers: vec![Layer::Field(ground)] };
-    worldgen::World { generator, spawn: [0, 16, 0], heights: Some((-64, 64)), points: Vec::new() }
+    worldgen::World { generator, spawn: [0, 16, 0], heights: Some((-64, 64)), points: Vec::new(), edits: Default::default() }
 }
 
 /**
@@ -197,7 +197,7 @@ fn pink<const WHITE: bool, const VEILED: bool>(_: u64) -> worldgen::World {
         _ => None,
     });
     let generator = Generator { kinds, seed: 1, layers: vec![Layer::Field(slab)] };
-    worldgen::World { generator, spawn: [0, 0, 0], heights: Some((-64, 64)), points: Vec::new() }
+    worldgen::World { generator, spawn: [0, 0, 0], heights: Some((-64, 64)), points: Vec::new(), edits: Default::default() }
 }
 
 /**
@@ -251,7 +251,7 @@ fn red_and_green<const RED_NEAR: bool>(_: u64) -> worldgen::World {
         _ => None,
     });
     let generator = Generator { kinds, seed: 1, layers: vec![Layer::Field(slab)] };
-    worldgen::World { generator, spawn: [0, 0, 0], heights: Some((-64, 64)), points: Vec::new() }
+    worldgen::World { generator, spawn: [0, 0, 0], heights: Some((-64, 64)), points: Vec::new(), edits: Default::default() }
 }
 
 /** The nearer of two media shows over the other, not mixed with it as if in any order. */
@@ -290,7 +290,7 @@ fn sheeted_block(_: u64) -> worldgen::World {
         },
     );
     let generator = Generator { kinds: vec![kind(&["#ffffff"]), kind(&["#ff0000"])], seed: 1, layers: vec![Layer::Population(block)] };
-    worldgen::World { generator, spawn: [0, -400, 0], heights: Some((-64, 512)), points: Vec::new() }
+    worldgen::World { generator, spawn: [0, -400, 0], heights: Some((-64, 512)), points: Vec::new(), edits: Default::default() }
 }
 
 #[test]
@@ -334,7 +334,7 @@ fn specks<const MOVED: bool>(_: u64) -> worldgen::World {
         (ground || h.is_multiple_of(20000)).then_some(((h % 4) as u8, None))
     });
     let generator = Generator { kinds, seed: 1, layers: vec![Layer::Field(field)] };
-    worldgen::World { generator, spawn: by, heights: Some((-200, 200)), points: Vec::new() }
+    worldgen::World { generator, spawn: by, heights: Some((-200, 200)), points: Vec::new(), edits: Default::default() }
 }
 
 /** What the voxels engine draws of `make`'s world from `eye` past its spawn, within level 0's reach: its pixels. */
@@ -399,6 +399,46 @@ fn frames_come_till_a_world_lit_anew_shows() {
         world.relight(shared);
         engine = Kind::Voxels.make(&world);
         assert!(frames_till_still(&mut *engine, &mut world, &look, &mut easel), "lit anew");
+    }
+}
+
+/** Red ground under y = 0, endless, a pit 2 m square and 1 m deep at the origin if `pit`. */
+fn ground_with_pit<const PIT: bool>(_: u64) -> worldgen::World {
+    use worldgen::generator::{Field, Generator, KindDef, Layer, Op};
+    let kinds = vec![KindDef { name: "ground", kind_type: 10, colors: &["#ff0000"], walk_through: false, glows: false, medium: false }];
+    let ground = Field::at("ground", 0.0, Op::Fill, |x, y, z| (y < 0 && !(PIT && in_pit([x, y, z]))).then_some((0, None)));
+    let generator = Generator { kinds, seed: 1, layers: vec![Layer::Field(ground)] };
+    worldgen::World { generator, spawn: [0, 16, 0], heights: Some((-64, 64)), points: Vec::new(), edits: Default::default() }
+}
+
+/** Whether a site is in the pit of `ground_with_pit`. */
+fn in_pit([x, y, z]: [i64; 3]) -> bool {
+    (-8..8).contains(&x) && (-8..0).contains(&y) && (-8..8).contains(&z)
+}
+
+/** Ground cut, a pit taken out of it (World::take_out), is drawn as ground generated with the pit, lit or not. */
+#[test]
+#[ignore = "draws on the GPU: needs Vulkan, as Mesa's software one"]
+fn ground_cut_is_drawn_as_ground_generated_so() {
+    let day = Brightness { sky: 1.0, sun: 1.0, glow: 0.0 };
+    for light in [None, Some(day)] {
+        let mut look = Look::new([20.0, 24.0, 20.0], [-135.0, -40.0], FOV, 1000.0, [160.0, 100.0]);
+        look.light = light;
+        let pixels = |engine: &mut dyn Engine, world: &mut World, easel: &mut Easel| {
+            let frame = drawn_complete(engine, world, &look, easel);
+            easel.pixels(&*frame.picture, look.size.map(|v| v as u32)).2
+        };
+        let mut easel = Easel::offscreen(None);
+        let mut dug = World::new(ground_with_pit::<true>(1), light.map(Shared::new), 4);
+        let generated = pixels(&mut *Kind::Voxels.make(&dug), &mut dug, &mut easel);
+        // Cut in a world shown already, by the same engine.
+        let mut world = World::new(ground_with_pit::<false>(1), light.map(Shared::new), 4);
+        let mut engine = Kind::Voxels.make(&world);
+        assert!(pixels(&mut *engine, &mut world, &mut easel) != generated, "{light:?}: the pit shows");
+        assert!(world.take_out((-8..8).flat_map(|x| (-8..0).flat_map(move |y| (-8..8).map(move |z| [x, y, z]))).filter(|&s| in_pit(s))));
+        let cut = pixels(&mut *engine, &mut world, &mut easel);
+        let differ = cut.chunks(4).zip(generated.chunks(4)).filter(|(a, b)| a != b).count();
+        assert_eq!(differ, 0, "{light:?}: pixels unlike the pit generated");
     }
 }
 

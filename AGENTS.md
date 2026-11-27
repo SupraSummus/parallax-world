@@ -58,6 +58,7 @@ worldgen/                    # The world-generation engine, no direction up in i
 │   ├── generator/           # Any box at any level: forms, drawables, shapes, things
 │   ├── build.rs             # Short forms to write worlds with
 │   ├── grid.rs              # Voxel storage in bricks, each site's look
+│   ├── edits.rs             # What a world's sites hold since it was generated, at every level
 │   ├── noise.rs             # Integer hashes, fixed point (Fx), noise; seeds by name (Scope)
 │   ├── units.rs             # Metres per lattice unit
 │   ├── sites.rs             # The sites a layer reads for: their spacing
@@ -112,7 +113,7 @@ worlds/                      # The worlds, on worldgen's and ground's public API
 │                            # scenes/ is not in git (docs/generators.md, "Scenes")
 ├── tests/                   # Its worlds keep the contract and their cost baselines (checks.rs); scenes
 └── examples/                # map, look, check, cost, bench: a world looked at, checked, measured
-statics/                     # Statics, an experiment (docs/statics.md), linted but not tested by pnpm
+statics/                     # Statics (docs/statics.md): what stands, what a cut brings down (native/src/fall.rs)
 ├── src/                     # Faces and beams (model.rs) on the octree 2^l·Z³ (lattice.rs);
 │                            # a level measured from the one below (gather.rs); the forces (bodies.rs)
 └── examples/statics.rs      # The experiments
@@ -126,6 +127,9 @@ native/src/                  # The frontend: egui on winit and wgpu; in browsers
 ├── view.rs                  # The camera's basis and focal length
 ├── eye.rs                   # How light shows: the eye adapting, its curve
 ├── inspect.rs               # The voxel under the pointer, as the voxels engine finds it
+├── cut.rs                   # Cutting: what a stroke where one looks takes out of the world
+├── fall.rs                  # What a cut brings down: statics around it, on a thread
+├── motion.rs                # How it falls: a rigid body sampled onto the lattice, matter moved between sites
 ├── engine.rs                # What draws: Engine, Picture, Painter
 └── engine/
     ├── voxels.rs, voxels.wgsl # The voxels engine: rays through the tiles' voxels

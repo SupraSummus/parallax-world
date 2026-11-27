@@ -192,6 +192,7 @@ impl Scene {
             spawn,
             heights: Some(heights),
             points: Vec::new(),
+            edits: Default::default(),
         }
     }
 }

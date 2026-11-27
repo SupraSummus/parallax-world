@@ -145,7 +145,13 @@ pub fn valley(seed: u64) -> World {
     .into_iter()
     .flatten()
     .collect();
-    World { generator: Generator { kinds: kinds(), seed: world.seed("layers"), layers }, spawn, heights: Some(mountains::HEIGHTS), points }
+    World {
+        generator: Generator { kinds: kinds(), seed: world.seed("layers"), layers },
+        spawn,
+        heights: Some(mountains::HEIGHTS),
+        points,
+        edits: Default::default(),
+    }
 }
 
 /** The valley's kinds, each part's after those of the parts it draws from; the moor alone has them too. */
