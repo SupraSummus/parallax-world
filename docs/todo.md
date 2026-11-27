@@ -740,30 +740,37 @@ Numbers are for the forest at 1280×800, as measured when written.
     a baseline per place and level would do for a test with a quarter's slack.
   - `docs/generators.md` holds the worlds beside the engine ("Composing").
 
-## Statics and falling
+## Mechanics
 
-- **What hangs under a cut holds it up.**
-  A cut bears what is over it, so what lies lower is held (`native/src/fall.rs`):
+- **It is slow.** A forest tree of 3000 cells, 7000 nodes, at level 0
+  simulates about six times slower than it falls, on one thread;
+  the matrix products could share the cores.
+- **What hangs under a cut holds still.**
+  A cut bears what is over it, so what lies lower holds still (`native/src/fall.rs`):
   a branch cut at its foot whose tip droops lower stays, held by its tip.
-- **Statics looks only near a cut, at level 0.**
-  10 m across and 30 m up; past 150 000 cells it gives up,
-  as on a hillside rising over the cut. Far off nothing is settled.
-- **What falls is not settled again where it lies**,
-  and pieces falling at once do not meet.
+  The worlds have no ground to hold instead.
+- **Mechanics looks only near a cut**, 10 m across and 30 m up;
+  past `BUDGET` cells at every level it gives up. Far off nothing moves.
+- **Loose matter is carried, not simulated**,
+  and may be left behind where a cell hops into its site.
+- **A hop that is blocked waits**, and the matter shows a site behind
+  where it is, till it is free.
+- **A cube's shear at its corners is partly the cube's own**
+  (a trilinear element locks in bending),
+  so a weld judges only the stress across it, not along an edge.
+- **Coarser levels hold more than level 0** (worlds, [mechanics.md](mechanics.md)):
+  a cut that parts level 0 does not part them, so a tree is kept at level 0.
 - **An edit is lit again a tile around it**;
   a shadow cast farther stays till the world is lit anew.
 - **All that bears is wood.** Worlds give no materials.
 
 ## Ideas
 
-- Matter that moves by itself, not rigid bodies (`native/src/motion.rs`).
-  Each voxel's matter with its speed, bound to its neighbours across faces
-  by what bears stretch, shear, bending and twist, each with a strength;
-  a body falling, breaking as it lands, sand pouring, all one model,
-  and statics its rest.
-  Stiff matter wants steps of 10⁻⁵ s taken explicitly;
-  position-based dynamics (XPBD) takes 1/240 s,
-  but long members sag unless solved many rounds.
+- Mechanics at several levels at once (`mechanics/`):
+  the finer near the cut or the eye, the coarser beyond,
+  a coarser cell taking its parts' stiffness, as the solver's levels already do.
+- Mechanics that wakes by itself: whatever is edited, not only cut,
+  and what lands on something, settling it again.
 - A cell's stiffness from the continuum (`statics/`).
   A cell's 15 beams with a section fitted (`SECTION`)
   could be a 36×36 stiffness of its faces, from E and ν,

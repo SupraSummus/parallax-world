@@ -12,7 +12,7 @@ egui-winit = { version = "0.37", default-features = false, features = ["wayland"
 bake = { path = "../bake" }
 lattice = { path = "../lattice" }
 light = { path = "../light" }
-statics = { path = "../statics" }
+mechanics = { path = "../mechanics" }
 worldgen = { path = "../worldgen" }
 winit = { version = "0.30.13", default-features = false, features = ["rwh_06", "wayland", "x11"] }
 worlds = { path = "../worlds" }

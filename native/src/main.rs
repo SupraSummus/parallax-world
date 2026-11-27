@@ -14,7 +14,6 @@ mod eye;
 mod fall;
 mod gpu;
 mod inspect;
-mod motion;
 mod threads;
 mod view;
 mod window;
@@ -245,7 +244,7 @@ struct View {
     walker: Option<Walker>,
     /** Whether the window tells of the voxel under the pointer (inspect.rs), as the voxels engine finds it. */
     inspecting: bool,
-    /** What cuts bring down (fall.rs). */
+    /** What cuts set moving (fall.rs). */
     falls: fall::Falls,
 }
 
@@ -362,7 +361,7 @@ impl View {
 
     /**
      * A stroke where it looks (cut.rs): what it meets taken out of the
-     * world, and what that brings down asked of statics (fall.rs).
+     * world, and what that sets moving simulated (fall.rs).
      * Whether it took anything.
      */
     fn cut(&mut self) -> bool {
@@ -581,8 +580,8 @@ impl window::Content for App {
             ui.heading("Parallax");
             ui.label(&self.stats);
             ui.label(format!("{} tiles being made", self.view.world.making()));
-            if !self.view.falls.told.is_empty() || self.view.falls.waiting > 0 {
-                ui.label(format!("{}{}", self.view.falls.told, if self.view.falls.waiting > 0 { " (finding what falls…)" } else { "" }));
+            if !self.view.falls.found.is_empty() || self.view.falls.waiting > 0 {
+                ui.label(format!("{}{}", self.view.falls.found, if self.view.falls.waiting > 0 { " (moving…)" } else { "" }));
             }
             self.view.panel(ui);
             let t = self.times;
