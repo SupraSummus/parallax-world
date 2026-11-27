@@ -13,7 +13,8 @@ the light from voxels' faces),
 in which no direction is up,
 `ground/` on `worldgen/` (worlds on a ground: plans by column, heights, columns,
 land shared by column; up is +y),
-`light/` (light worked out across a world, [light.md](light.md))
+`light/` (light worked out across a world, [light.md](light.md)),
+`mechanics/` on `lattice/` (matter that moves and breaks, [mechanics.md](mechanics.md))
 and `worlds/` on `worldgen/` and `ground/`
 (the registry, and worlds in crates of their own inside it);
 `native/` links them.
