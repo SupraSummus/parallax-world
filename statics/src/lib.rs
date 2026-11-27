@@ -1,7 +1,6 @@
 //! Statics (docs/statics.md): does what is built stand, and what falls
 //! when it does not? Matter stays on the lattice; what falls is taken off
-//! it whole. The engine settles level 0 after a cut (native's fall.rs);
-//! coarser levels are an experiment.
+//! it whole. An experiment: the engine has mechanics/ instead.
 //!
 //! At every level of 2^l·Z³, the worlds' octree (lattice.rs), a node is
 //! a face between two cells, and a cell joins its faces by beams, each a

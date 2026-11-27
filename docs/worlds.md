@@ -21,8 +21,8 @@ what lies within a quarter metre of the voxel it meets
 is taken out of the world, at every level of detail.
 Strokes one after another cut deeper, and a notch as an axe cuts one.
 What a stroke leaves standing on nothing, or too weak to stand,
-falls once statics finds it, a second or two on, as a rigid body
-([statics.md](statics.md), "In the engine"):
+moves: it bends, breaks, falls and lands, all on the voxels
+([mechanics.md](mechanics.md)):
 a tree cut through topples if it leans past its stump,
 or if notched first on the side it is to fall to,
 and lies where it lands or is caught, its leaves with it.

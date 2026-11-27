@@ -14,7 +14,8 @@ Entry point for AI agents working on this codebase. Read this first.
 | [docs/generators.md](docs/generators.md) | Generating worlds in pieces: layers, things, rules | Writing or changing a world generator |
 | [docs/checks.md](docs/checks.md) | The contract worlds keep, checks of places and directions, what generating costs | A world's check or cost fails |
 | [docs/light.md](docs/light.md) | Light: what the prototype gets wrong, what was tried, what it costs | Touching `light/` or native's lighting |
-| [docs/statics.md](docs/statics.md) | Statics, an experiment: what stands and what falls, what was measured | Touching `statics/`, or physics |
+| [docs/mechanics.md](docs/mechanics.md) | Mechanics on the voxels: matter that moves, bends and breaks, at a level of detail | Touching `mechanics/` or `native/src/fall.rs` |
+| [docs/statics.md](docs/statics.md) | Statics, an experiment: what stands and what falls, what was measured | Touching `statics/` |
 | [.claude/skills/lead/SKILL.md](.claude/skills/lead/SKILL.md) | The lead role: driving changes to main through delegated work and PRs | Only when the user asks for it (`/lead`) |
 
 Each concept has one home:
@@ -113,7 +114,12 @@ worlds/                      # The worlds, on worldgen's and ground's public API
 │                            # scenes/ is not in git (docs/generators.md, "Scenes")
 ├── tests/                   # Its worlds keep the contract and their cost baselines (checks.rs); scenes
 └── examples/                # map, look, check, cost, bench: a world looked at, checked, measured
-statics/                     # Statics (docs/statics.md): what stands, what a cut brings down (native/src/fall.rs)
+mechanics/src/               # Mechanics on the voxels (docs/mechanics.md), driven by native/src/fall.rs
+├── lib.rs                   # Matter: cells welded across faces, contacts; a step; hops between sites
+├── element.rs               # A cell as a finite element: a co-rotated cube of eight nodes
+├── solve.rs                 # Conjugate gradients, V-cycles over the octree
+└── tests.rs                 # A post dropped, a post toppling, a beam out of a wall
+statics/                     # Statics, an experiment (docs/statics.md): what stands
 ├── src/                     # Faces and beams (model.rs) on the octree 2^l·Z³ (lattice.rs);
 │                            # a level measured from the one below (gather.rs); the forces (bodies.rs)
 └── examples/statics.rs      # The experiments
@@ -128,8 +134,7 @@ native/src/                  # The frontend: egui on winit and wgpu; in browsers
 ├── eye.rs                   # How light shows: the eye adapting, its curve
 ├── inspect.rs               # The voxel under the pointer, as the voxels engine finds it
 ├── cut.rs                   # Cutting: what a stroke where one looks takes out of the world
-├── fall.rs                  # What a cut brings down: statics around it, on a thread
-├── motion.rs                # How it falls: a rigid body sampled onto the lattice, matter moved between sites
+├── fall.rs, fall/tests.rs   # What a cut sets moving: mechanics at a level of detail, on a thread
 ├── engine.rs                # What draws: Engine, Picture, Painter
 └── engine/
     ├── voxels.rs, voxels.wgsl # The voxels engine: rays through the tiles' voxels
