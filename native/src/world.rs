@@ -33,7 +33,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use lattice::GRID_LEVELS;
 pub use lattice::TileId;
-use lattice::{ALPHA, BRICK, BRICK_SITES, Blocks, FastMap, FastSet, Grid, Tiles, alpha_of, medium};
+use lattice::{ALPHA, BRICK, BRICK_SITES, Blocks, FastMap, FastSet, Grid, Holds, Tiles, alpha_of, medium};
 use light::{Light, Shared};
 use worldgen::grid::{Box3, Held};
 use worldgen::tiles::{made_with, make_tiles};
@@ -586,18 +586,19 @@ impl World {
         }
     }
 
-    /** Takes `sites` (level 0) out of the world: `change`, each to hold nothing. */
+    /** Takes `sites` (level 0) out of the world: `change`, each to hold nothing, holding on to nothing. */
     pub fn take_out(&mut self, sites: impl IntoIterator<Item = [i64; 3]>) -> bool {
-        self.change(sites.into_iter().map(|site| (site, Held::default())))
+        self.change(sites.into_iter().map(|site| (site, (Held::default(), 0))))
     }
 
     /**
-     * Has each of `changes` (level-0 sites) hold what it says (worldgen's
-     * Edits): the tiles they are in, at every level, are made again as of
-     * the edit, shown as they were till they are; those near them
-     * (`lit_near`) are lit again. Returns whether anything changed.
+     * Has each of `changes` (level-0 sites) hold what it says, holding on
+     * as it says (worldgen's Edits): the tiles they are in, at every
+     * level, are made again as of the edit, shown as they were till they
+     * are; those near them (`lit_near`) are lit again. Returns whether
+     * anything changed.
      */
-    pub fn change(&mut self, changes: impl IntoIterator<Item = ([i64; 3], Held)>) -> bool {
+    pub fn change(&mut self, changes: impl IntoIterator<Item = ([i64; 3], (Held, Holds))>) -> bool {
         let Some((epoch, b)) = self.world.edits.change(changes) else { return false };
         for (level, tiles) in self.levels.iter_mut().enumerate() {
             let [lo, hi] = tiles_of(level, b);

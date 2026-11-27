@@ -72,6 +72,16 @@ pub const fn opposite(k: usize) -> usize {
 }
 
 /**
+ * Across which of its faces a site's matter holds on, a bit per kind of
+ * VOXEL_FACES: two sites are joined across a face where both hold on
+ * across it, so what only touches is not (docs/mechanics.md).
+ */
+pub type Holds = u8;
+
+/** Holding on across every face. */
+pub const HOLDS_ALL: Holds = (1 << FACE_KINDS) - 1;
+
+/**
  * The faces (kinds of VOXEL_FACES) a ray along `direction` sees a voxel
  * by: those turned most against it, alike (a ray straight down sees
  * three). What a site looks like along a direction is the mean of how it

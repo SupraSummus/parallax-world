@@ -3,29 +3,32 @@
 //! It knows nothing of what things are: matter bears (it stops a walking
 //! body, as a world marks its kinds) or is loose (`kind`).
 //!
-//! What bears, joined to the cut across faces, is matter (mechanics/,
+//! What bears, touching the cut across faces, is matter (mechanics/,
 //! docs/mechanics.md), all of one material (MATTER): it bends, breaks,
-//! falls and lands, all on the lattice. A cut bears what is over it, so
-//! what lies lower holds still, as does what lies at the edge of what is
-//! looked at (`Around`). Loose matter bears nothing: it goes with the
-//! matter that bears nearest it (`goes_with`).
+//! falls and lands, all on the lattice, welded where it holds on (edits'
+//! `holds`), and holding on after where it is welded. A cut bears what is
+//! over it, so what lies lower holds still, as does what lies at the edge
+//! of what is looked at (`Around`). Loose matter bears nothing: it goes
+//! with the matter that bears nearest it (`goes_with`).
 //!
 //! Matter is simulated at the finest level of detail it is few enough at
 //! (BUDGET): a cell is a voxel of that level that bears, and carries the
 //! level-0 sites of its cube, and of the loose matter that goes with it,
 //! moving them by its size. So what level 0 holds moves site by site, and
 //! what is too large for it by the cells of a coarser level, as that level
-//! draws it.
+//! draws it. A cell holds on across a face where most of what bears on
+//! that face of its cube does, and those sites hold on after as it does
+//! (`on_face`): at level 0, each site as itself.
 
 use std::collections::VecDeque;
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};
 use std::time::Duration;
 
-use lattice::{ALPHA, FastMap, FastSet};
+use lattice::{ALPHA, FACE_KINDS, FastMap, FastSet, Holds};
 use mechanics::{Cell, Material, Matter, WOOD, faces};
 use web_time::Instant;
-use worldgen::edits::Sites;
+use worldgen::edits::{Sites, holds};
 use worldgen::grid::{Held, VoxelGrid};
 use worldgen::sites::middle;
 use worldgen::tiles::{TILE, made_with, sites_as};
@@ -105,6 +108,11 @@ impl Voxels {
         kind(&self.held(site))
     }
 
+    /** Across which faces what a level-0 site holds holds on. */
+    fn holds(&self, zero: [i64; 3]) -> Holds {
+        holds(&self.edits, zero)
+    }
+
     /** The level-0 site a site of this level is read at. */
     fn read_at(&self, site: [i64; 3]) -> [i64; 3] {
         let s = 1i64 << self.level;
@@ -142,9 +150,9 @@ impl Around {
 }
 
 /**
- * What bears, joined to the cut (`cut`, sites of `voxels`' level) across
- * faces, before it: the sites that move, the cut's among them; None past
- * BUDGET.
+ * What bears, touching the cut (`cut`, sites of `voxels`' level) across
+ * faces, holding on or not, before it: the sites that move, the cut's
+ * among them; None past BUDGET.
  */
 fn moving(voxels: &mut Voxels, around: &Around, cut: &FastSet<[i64; 3]>) -> Option<FastSet<[i64; 3]>> {
     let mut moving: FastSet<[i64; 3]> = FastSet::default();
@@ -236,11 +244,29 @@ pub struct Job {
     pub before: Arc<Sites>,
 }
 
-/** What a cell carries: level-0 sites from its cube's first, and what each holds. */
-type Carried = Vec<([i64; 3], Held)>;
+/** What a cell carries: level-0 sites from its cube's first, what each holds, and across which faces that holds on. */
+type Carried = Vec<([i64; 3], Held, Holds)>;
 
-/** Level-0 sites changed, and what each holds now. */
-type Changes = Vec<([i64; 3], Held)>;
+/** Level-0 sites changed, what each holds now, and across which faces that holds on. */
+type Changes = Vec<([i64; 3], (Held, Holds))>;
+
+/** Across which faces a cell holds on that carries `carried`, its cube `s` sites a side: those most of what bears on does. */
+fn holding(carried: &Carried, s: i64) -> Holds {
+    let holds = |f: usize| {
+        let on = carried.iter().filter(|(d, held, _)| on_face(*d, s) & (1 << f) != 0 && kind(held) == Kind::Bearing);
+        let (all, holding) = on.fold((0, 0), |(a, h), (_, _, holds)| (a + 1, h + usize::from(holds & (1 << f) != 0)));
+        2 * holding > all
+    };
+    (0..FACE_KINDS).filter(|&f| holds(f)).fold(0, |h, f| h | 1 << f)
+}
+
+/** The faces of its cell's cube, `s` sites a side, that a site carried at `d` from its first lies on: none, if it is not in the cube. */
+fn on_face(d: [i64; 3], s: i64) -> Holds {
+    if d.iter().any(|&v| !(0..s).contains(&v)) {
+        return 0;
+    }
+    (0..FACE_KINDS).filter(|&f| d[f / 2] == if f % 2 == 0 { 0 } else { s - 1 }).fold(0, |h, f| h | 1 << f)
+}
 
 /** What a cut sets moving: matter, the sites it was at (the cut's among them), the world at its level. */
 struct Moving {
@@ -274,7 +300,8 @@ fn moving_matter(world: &Arc<worldgen::World>, job: &Job, around: &Around) -> Re
             for zero in cube(site, s) {
                 let held = voxels.fine(zero);
                 if kind(&held) != Kind::Empty && !around.cut.contains(&zero) {
-                    carried[c as usize].push(([zero[0] - origin[0], zero[1] - origin[1], zero[2] - origin[2]], held));
+                    let d = [zero[0] - origin[0], zero[1] - origin[1], zero[2] - origin[2]];
+                    carried[c as usize].push((d, held, voxels.holds(zero)));
                 }
             }
         }
@@ -285,11 +312,17 @@ fn moving_matter(world: &Arc<worldgen::World>, job: &Job, around: &Around) -> Re
                 // As much as what it carries fills its sites, what bears as heavy as MATTER, what is loose as LIGHT.
                 let weighs =
                     |held: &Held| f64::from(held.0.0) / f64::from(ALPHA) * if kind(held) == Kind::Bearing { MATTER.rho } else { LIGHT };
-                let mass = carried.iter().map(|(_, held)| weighs(held)).sum::<f64>().max(LIGHT) * UNIT_SIZE.powi(3);
-                Cell { site, mass, material: MATTER, what: carried }
+                let mass = carried.iter().map(|(_, held, _)| weighs(held)).sum::<f64>().max(LIGHT) * UNIT_SIZE.powi(3);
+                Cell { site, mass, material: MATTER, holds: holding(&carried, s), what: carried }
             })
             .collect();
-        let mut matter = Matter::new(level, UNIT_SIZE, cells, &mut |s| (voxels.kind(s) == Kind::Bearing).then_some(MATTER));
+        let mut matter = Matter::new(level, UNIT_SIZE, cells, &mut |site| {
+            (voxels.kind(site) == Kind::Bearing).then(|| {
+                let carried: Carried =
+                    cube(site, s).map(|zero| (zero.map(|v| v.rem_euclid(s)), voxels.fine(zero), voxels.holds(zero))).collect();
+                (MATTER, holding(&carried, s))
+            })
+        });
         matter.take_out(&cut);
         return Ok(Moving { matter, sites: moving, voxels });
     }
@@ -309,33 +342,60 @@ pub fn simulate(world: Arc<worldgen::World>, job: &Job, tell: &mut dyn FnMut(Tol
     let s = 1i64 << matter.level;
     // The world's sites that stop matter: what bears and was not set moving.
     let mut still = |site: [i64; 3]| !moving.contains(&site) && voxels.kind(site) == Kind::Bearing;
-    let mut frame: FastMap<[i64; 3], Held> = FastMap::default();
-    let (mut shown, mut moved) = (0.0, 0);
-    while !matter.cells.is_empty() && matter.time < LONGEST && !matter.at_rest() {
-        for (i, from, to) in matter.step(&mut still) {
-            moved += 1;
-            for &(d, _) in &matter.cells[i as usize].what {
-                frame.insert([from[0] * s + d[0], from[1] * s + d[1], from[2] * s + d[2]], Held::default());
-            }
-            for &(d, held) in &matter.cells[i as usize].what {
-                frame.insert([to[0] * s + d[0], to[1] * s + d[1], to[2] * s + d[2]], held);
-            }
+    // Each cell as the world shows it: where, holding on to what.
+    let mut shown: Vec<([i64; 3], Holds)> = matter.cells.iter().map(|c| (c.site, holding(&c.what, s))).collect();
+    let (mut last, mut changed) = (0.0, 0);
+    let mut show = |matter: &mut Matter<Carried>, shown: &mut [([i64; 3], Holds)]| {
+        let changes = changes(matter, shown);
+        changed += changes.len();
+        if !changes.is_empty() {
+            tell(Told::Frame(matter.time, changes));
         }
-        if matter.time - shown >= EVERY || matter.at_rest() {
-            shown = matter.time;
-            if !frame.is_empty() {
-                tell(Told::Frame(shown, frame.drain().collect()));
-            }
+    };
+    while !matter.cells.is_empty() && matter.time < LONGEST && !matter.at_rest() {
+        matter.step(&mut still);
+        if matter.time - last >= EVERY {
+            last = matter.time;
+            show(&mut matter, &mut shown);
         }
     }
+    show(&mut matter, &mut shown);
     tell(Told::Done(format!(
-        "mechanics: {cells} cells at level {}, {welds} welds, {} broke; {moved} moves in {:.1} s simulated, {:.1} s taken, {} rounds",
+        "mechanics: {cells} cells at level {}, {welds} welds, {} broke; {changed} sites changed in {:.1} s simulated, {:.1} s taken, {} rounds",
         matter.level,
         welds - matter.welds(),
         matter.time,
         started.elapsed().as_secs_f64(),
         matter.rounds
     )));
+}
+
+/**
+ * What changed since `shown` (each cell's site and what it held on to, as
+ * told last), and `shown` as now: each cell moved or holding on otherwise
+ * is emptied where it was, then put where it is, what it carries on its
+ * cube's faces holding on as it does.
+ */
+fn changes(matter: &mut Matter<Carried>, shown: &mut [([i64; 3], Holds)]) -> Changes {
+    let s = 1i64 << matter.level;
+    let at = |site: [i64; 3], d: [i64; 3]| [site[0] * s + d[0], site[1] * s + d[1], site[2] * s + d[2]];
+    let changed: Vec<usize> = (0..shown.len()).filter(|&i| shown[i] != (matter.cells[i].site, matter.cells[i].holds)).collect();
+    let mut changes = FastMap::default();
+    for &i in &changed {
+        for &(d, ..) in &matter.cells[i].what {
+            changes.insert(at(shown[i].0, d), (Held::default(), 0));
+        }
+    }
+    for &i in &changed {
+        let cell = &mut matter.cells[i];
+        for (d, held, holds) in &mut cell.what {
+            let face = on_face(*d, s);
+            *holds = *holds & !face | cell.holds & face;
+            changes.insert(at(cell.site, *d), (*held, *holds));
+        }
+        shown[i] = (cell.site, cell.holds);
+    }
+    changes.into_iter().collect()
 }
 
 /**

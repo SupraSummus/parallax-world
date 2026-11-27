@@ -22,10 +22,15 @@ fn grove() -> worldgen::World {
     worldgen::World { generator, spawn: [0; 3], heights: Some((-64, 128)), points: Vec::new(), edits: Default::default() }
 }
 
-/** Cuts `sites` of `world`, as a stroke does, and simulates what that sets moving till it rests: what each site changed holds then, and what was found. */
+/**
+ * Cuts `sites` of `world`, as a stroke does, and simulates what that sets
+ * moving till it rests: what each site whose matter changed holds then
+ * (not where only what holds on did), and what was found.
+ */
 fn cut(world: &Arc<worldgen::World>, sites: Vec<[i64; 3]>) -> (FastMap<[i64; 3], Held>, String) {
     let before = world.edits.sites();
-    world.edits.change(sites.iter().map(|&s| (s, Held::default())));
+    world.edits.change(sites.iter().map(|&s| (s, (Held::default(), 0))));
+    let mut was = Voxels::new(world, &world.edits.sites(), 0);
     let (mut changed, mut found) = (FastMap::default(), String::new());
     simulate(world.clone(), &Job { cut: sites, before }, &mut |told| match told {
         Told::Frame(_, changes) => changed.extend(changes),
@@ -33,12 +38,18 @@ fn cut(world: &Arc<worldgen::World>, sites: Vec<[i64; 3]>) -> (FastMap<[i64; 3],
         Told::Start => {}
     });
     world.edits.change(changed.iter().map(|(&s, &h)| (s, h)));
-    (changed, found)
+    (changed.into_iter().filter(|&(s, (held, _))| was.held(s) != held).map(|(s, (held, _))| (s, held)).collect(), found)
 }
 
 /** What `world` holds at `site` now, edits and all. */
 fn now(world: &Arc<worldgen::World>, site: [i64; 3]) -> Kind {
     Voxels::new(world, &world.edits.sites(), 0).kind(site)
+}
+
+/** Whether `world`'s site `[x, y, z]` and the one over it are joined now: each holds on across the face between them, +y and −y. */
+fn joined_over(world: &Arc<worldgen::World>, [x, y, z]: [i64; 3]) -> bool {
+    let edits = world.edits.sites();
+    worldgen::edits::holds(&edits, [x, y, z]) & (1 << 3) != 0 && worldgen::edits::holds(&edits, [x, y + 1, z]) & (1 << 2) != 0
 }
 
 fn layer(y: i64) -> impl Iterator<Item = [i64; 3]> {
@@ -53,6 +64,21 @@ fn a_post_cut_through_drops_down_its_kerf_and_stands_its_leaves_with_it() {
     assert!((8..48).all(|y| (y == 47) != (now(&world, [1, y, 1]) == Kind::Bearing)), "a site lower, upright: {found}");
     assert!(changed.keys().any(|s| !column(s) && s[1] > 40), "its leaves moved with it");
     assert!(changed.keys().all(|s| s[0] < 20), "nothing of the other post");
+}
+
+/**
+ * A post dropped onto its stump only stands on it: cut under them both,
+ * they drop down the kerf together, the stump holding on to itself, and
+ * not to the post.
+ */
+#[test]
+fn a_post_dropped_onto_its_stump_does_not_hold_on_to_it_when_both_move() {
+    let world = Arc::new(grove());
+    cut(&world, layer(8).collect());
+    let (_, found) = cut(&world, layer(4).collect());
+    assert!((4..46).all(|y| now(&world, [1, y, 1]) == Kind::Bearing), "both a site lower: {found}");
+    assert!(joined_over(&world, [1, 5, 1]), "the stump whole: {found}");
+    assert!(!joined_over(&world, [1, 6, 1]), "on it, the post apart: {found}");
 }
 
 #[test]
