@@ -477,11 +477,17 @@ Numbers are for the forest at 1280×800, as measured when written.
   rounds are capped (`ROUNDS`), so light that bounces more is lost.
   A coarser level cannot take over the rest at the coarsest.
 - **Light forgets by how many sites it began, not by what they hold** (`KEPT_SITES`),
-  though each byte a site keeps costs time too
+  each level by its own, the same number for each,
+  though each byte a site keeps costs time too,
+  and below what a view reads at once lighting slows several times over
   ([light.md](light.md), "In native, and what it costs"):
   counted by bytes, smaller sites would be kept longer.
+  The levels read unlike: in the forest's first view, with fewer kept,
+  levels 1 and 5 were begun four times over, the rest about once.
   The largest misses are a reflecting site's rounds,
-  three pointers away (its lock, its `Site`, its rounds' vector).
+  two pointers from its cube (its `Site`, its rounds' vector).
+  Each level forgetting on its own, its tiles could be kept apart too
+  (`Kept`, one map a level), not filtered by level when it forgets.
 
 ## Native
 
