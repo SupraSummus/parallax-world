@@ -47,9 +47,10 @@ pub fn times_t(m: &M3, v: V3) -> V3 {
 /**
  * The system: each cell's site (for the octree) and where it is (for
  * rigid motions), its block on the diagonal, and each pair's (i, j, B):
- * the block in row i, column j, its transpose in row j, column i.
+ * the block in row i, column j, its transpose in row j, column i; a pair
+ * twice is the sum of its blocks.
  */
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct System {
     pub sites: Vec<[i64; 3]>,
     pub at: Vec<V3>,
@@ -58,24 +59,6 @@ pub struct System {
 }
 
 impl System {
-    /** The blocks of each pair added up, a block a pair: what cells share is multiplied once. */
-    pub fn merge(&mut self) {
-        let mut at: lattice::FastMap<(u32, u32), usize> = lattice::FastMap::default();
-        let mut merged: Vec<(u32, u32, M3)> = Vec::with_capacity(self.pairs.len());
-        for &(i, j, ref b) in &self.pairs {
-            // (j, i, B) is (i, j, Bᵀ).
-            let (key, b) = if i < j { ((i, j), *b) } else { ((j, i), std::array::from_fn(|r| std::array::from_fn(|c| b[c][r]))) };
-            match at.get(&key) {
-                Some(&k) => (0..3).for_each(|r| (0..3).for_each(|c| merged[k].2[r][c] += b[r][c])),
-                None => {
-                    at.insert(key, merged.len());
-                    merged.push((key.0, key.1, b));
-                }
-            }
-        }
-        self.pairs = merged;
-    }
-
     pub fn times(&self, x: &[V3], y: &mut [V3]) {
         for (i, d) in self.diag.iter().enumerate() {
             y[i] = times(d, x[i]);
