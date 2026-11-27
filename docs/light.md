@@ -188,47 +188,63 @@ till hosts read sites as light does
 What is found at a site is a function of the world alone,
 so the Lights keep it together, every level's alike,
 and two finding the same at once do no harm.
-Each site is kept under a lock of its own (`Lit` in `light/`):
+Each part of a site is set once, its rounds under a lock of their own
+(`Room` in `light/`):
 under one lock a column of tiles, and found by a map,
 the threads waited for each other, and the first view took a quarter more work.
 Their room is made a cube of 4 sites a side at a time (`CUBE`):
 light begins few sites of most bricks it reads,
 and of a brick's 512 a forest's first view began under a quarter.
-Each Light holds the tiles it read (`Level`), asking the others for each once.
-They keep the light of the tiles read lately (`KEPT_SITES`, `Shared::begun`):
-fewer hold less, and under what a view reads at once, lighting slows by half.
-Forgetting nothing, one thread lit a forest's first view in a third less time,
-holding twice as much: so each byte a site keeps costs time too.
+Each Light holds the tiles it read (`Level`), asking the others for each once,
+and lets go of a level's when that level forgets.
+They keep the light of the tiles read lately (`KEPT_SITES`, `Shared::begun`),
+each level by the sites it began.
+Counted over all levels at once,
+a coarse level's tiles went unread while finer levels worked,
+as finer sites read its light once,
+so they were forgotten and lit again, several times over:
+a view took three or four times the work.
+Fewer kept a level hold less,
+but under what a view reads at once, lighting slows several times over:
+a third fewer, and the forest's first view took half as much work again.
+Chosen so that a view holds about what it did before.
+So each byte a site keeps costs time too.
 Forgotten brick by brick, not tile by tile,
 a flight held a tenth less and owed twice the bricks.
 What a site keeps is, most first:
 the sites met that reflect, twenty or so, 8 bytes each (`Reflects`);
 what comes to it (`Paths`);
-its rounds, kept only of sites that stop light (no site reads another's);
+its rounds;
 and its settled light, of half the sites.
-Rounds and what they are found from
-are in 16 bits a channel (`Packed`): half of what floats took,
-a hundredth of a view's pixels one step of colour off.
-A site's settled light is not, read far more often than found:
-packed, it cost more time than the rest for a third of what they saved.
-Room for each round alone, not a vector's to spare,
-held a twentieth less for a tenth more work, a fifth in a forest.
+A site that stops no light keeps only its settled light (`Room`):
+nothing reflects on it, so none reads its rounds.
+What a site's light is found from is one allocation,
+one pointer from its cube (`Site`).
+All of it is in 16 bits a channel (`Packed`): half of what floats took,
+a hundredth of a view's pixels one step of colour off for the rounds,
+another for the settled light.
+Room for each round alone, not a vector's to spare, holds a fourteenth less
+for little more work (on the FCC lattice, a tenth more).
 
 Most of lighting's own time is reading:
 the world's sites the lines meet,
 and the rounds of the sites met that reflect, each a few cache lines away.
 Tried, and no faster:
 the sites lines met last kept by where (a quarter to a third met again);
-of a site's settled light, only the direction taking over wants read;
-a grid's alpha and colour of a site kept together.
+a grid's alpha and colour of a site kept together;
+the sites met that reflect kept by site, so that each is read once a round
+(a face's neighbour is met along its axis and beside its 4 edges):
+under half as many reads, as many cache misses;
+a tile forgotten keeping its sites' settled light:
+what is lit again is mostly what that light is found from.
 
 Native's light sliders light the world anew (`World::relight`),
 as slowly as at the start.
 
-Lighting the valley's first view, over two thirds of the world's threads' work
-is generating, the tiles rays ask for and those the light reads around them,
-and a quarter finding the light.
-Of that, most is the rounds past a site's first:
+Lighting the valley's first view, most of the world's threads' work
+is finding the light, a sixth or so generating
+(the tiles rays ask for and those the light reads around them).
+Of finding the light, most is the rounds past a site's first:
 each round reads sites one further around what is lit,
 many where sites filled in part reflect on each other, as all through a wood's crowns.
 Each site met that reflects has its own light found, and its tiles made,
