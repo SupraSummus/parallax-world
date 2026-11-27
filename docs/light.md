@@ -188,8 +188,9 @@ till hosts read sites as light does
 What is found at a site is a function of the world alone,
 so the Lights keep it together, every level's alike,
 and two finding the same at once do no harm.
-Each part of a site is set once, its rounds under a lock of their own
-(`Room` in `light/`):
+Each part of a site, and each of its rounds, is set once
+(`Room`, `Site` in `light/`), the same whoever sets it,
+and read without a lock:
 under one lock a column of tiles, and found by a map,
 the threads waited for each other, and the first view took a quarter more work.
 Their room is made a cube of 4 sites a side at a time (`CUBE`):
@@ -212,19 +213,24 @@ So each byte a site keeps costs time too.
 Forgotten brick by brick, not tile by tile,
 a flight held a tenth less and owed twice the bricks.
 What a site keeps is, most first:
-the sites met that reflect, twenty or so, 8 bytes each (`Reflects`);
+room for each of its rounds, 40 bytes each (`ROUNDS`);
+the sites met that reflect, thirty or so, 8 bytes each (`Reflects`);
 what comes to it (`Paths`);
-its rounds;
 and its settled light, of half the sites.
 A site that stops no light keeps only its settled light (`Room`):
 nothing reflects on it, so none reads its rounds.
-What a site's light is found from is one allocation,
+What a site's light is found from, and its rounds, is one allocation,
 one pointer from its cube (`Site`).
 All of it is in 16 bits a channel (`Packed`): half of what floats took,
 a hundredth of a view's pixels one step of colour off for the rounds,
 another for the settled light.
-Room for each round alone, not a vector's to spare, holds a fourteenth less
-for little more work (on the FCC lattice, a tenth more).
+A round is read some thirty times for each time it is found,
+by the sites it reflects for.
+Kept in a vector under a lock, grown a round at a time,
+each read took the lock and a pointer more,
+and each round a reallocation, often by a thread other than the one that made it:
+the forest's and the valley's first views took two fifths more work,
+and held a fourteenth less; of the room for rounds, about half is used.
 
 Most of lighting's own time is reading:
 the world's sites the lines meet,
@@ -236,7 +242,9 @@ the sites met that reflect kept by site, so that each is read once a round
 (a face's neighbour is met along its axis and beside its 4 edges):
 under half as many reads, as many cache misses;
 a tile forgotten keeping its sites' settled light:
-what is lit again is mostly what that light is found from.
+what is lit again is mostly what that light is found from;
+the coarser sites a site's lines hand over to read once a site
+(a forest's 55 reads were of 17): read again so soon, they are still cached.
 
 Native's light sliders light the world anew (`World::relight`),
 as slowly as at the start.
