@@ -476,10 +476,11 @@ Numbers are for the forest at 1280×800, as measured when written.
   each reading the coarsest level a line's length further round;
   rounds are capped (`ROUNDS`), so light that bounces more is lost.
   A coarser level cannot take over the rest at the coarsest.
-- **A site found works out the light coming in its last round twice**
-  (`Light::light`): once for its faces, to see whether it settled, then to keep.
-  Worked out once a round instead, rounds another Light kept would be worked out again:
-  which costs more is not measured.
+- **A site's rounds find each site they read anew** (`Light::coming`):
+  its tile and its cube, round after round,
+  as much work as reading its round.
+  Held from the site that reads it, they would hold each other:
+  sites reflect on each other, so the Lights would never let them go.
 - **Light forgets by how many sites it began, not by what they hold** (`KEPT_SITES`),
   each level by its own, the same number for each,
   though each byte a site keeps costs time too,
@@ -489,7 +490,7 @@ Numbers are for the forest at 1280×800, as measured when written.
   The levels read unlike: in the forest's first view, with fewer kept,
   levels 1 and 5 were begun four times over, the rest about once.
   The largest misses are a reflecting site's rounds,
-  a pointer from its cube (its `Site`), which has room for all of them.
+  a pointer from its cube (its `Site`).
   Each level forgetting on its own, its tiles could be kept apart too
   (`Kept`, one map a level), not filtered by level when it forgets.
 
