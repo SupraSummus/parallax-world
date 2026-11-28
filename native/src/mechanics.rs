@@ -559,7 +559,7 @@ pub struct Job {
  * it is due and the world shows the last (World::editing), so a slow
  * world skips to what is due rather than lags.
  */
-pub struct Falls {
+pub struct Mechanics {
     post: Post<Job>,
     told: Receiver<Told>,
     /** Cuts posted, not at rest yet. */
@@ -571,8 +571,8 @@ pub struct Falls {
     pub found: String,
 }
 
-impl Falls {
-    pub fn new(world: Arc<worldgen::World>) -> Falls {
+impl Mechanics {
+    pub fn new(world: Arc<worldgen::World>) -> Mechanics {
         let (send, told): (Sender<Told>, _) = channel();
         let post = Post::spawn(|jobs: Receiver<Job>| {
             vec![move || {
@@ -593,7 +593,7 @@ impl Falls {
                 }
             }]
         });
-        Falls { post, told, waiting: 0, since: Instant::now(), due: VecDeque::new(), found: String::new() }
+        Mechanics { post, told, waiting: 0, since: Instant::now(), due: VecDeque::new(), found: String::new() }
     }
 
     pub fn post(&mut self, job: Job) {
@@ -602,7 +602,7 @@ impl Falls {
     }
 
     /** Takes what was told, and has `world` show what is due by now. Whether anything still moves or is to be shown. */
-    pub fn falling(&mut self, world: &mut World) -> bool {
+    pub fn moving(&mut self, world: &mut World) -> bool {
         for told in self.told.try_iter() {
             match told {
                 Told::Start => self.since = Instant::now().max(self.due.back().map_or(self.since, |d| d.0)),

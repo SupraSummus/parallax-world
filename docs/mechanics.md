@@ -1,7 +1,7 @@
 # Mechanics
 
 Matter that moves, bends and breaks, on the voxels:
-the crate `mechanics/`, driven by `native/src/fall.rs`.
+the crate `mechanics/`, driven by `native/src/mechanics.rs`.
 The lattice never moves; matter moves between its sites.
 A tree standing, cut and toppling, and lying where it lands are one model,
 and statics is its rest.
@@ -64,7 +64,7 @@ it is written back to the world, which holds it still.
 A site asleep wakes where what bears on it,
 welded or touching, nears what it bears (`WAKE`).
 A cut wakes what bears touching it across faces, held on or not,
-over it and near it (`native/src/fall.rs`, `Around`):
+over it and near it (`native/src/mechanics.rs`, `Around`):
 a cut bears what is over it, so what lies lower stays asleep.
 It wakes the nearest `BUDGET` cells,
 at the finest level at which that is all of it, or the coarsest;
@@ -131,11 +131,11 @@ and the changes show when due.
 
 ## By local rules
 
-`local/` has this model's interface (`native/src/fall.rs` takes it by changing one import),
+`local/` has this model's interface (`native/src/mechanics.rs` takes it by changing one import),
 and is to take its place once it is fast enough.
 In it, a cell's matter moves by rules that read it and its neighbours only.
 Its tests take minutes, so pnpm leaves them out (`cargo test --release -p local`).
-It passes `native/src/fall.rs`'s tests of a post cut, cut twice and nicked,
+It passes `native/src/mechanics.rs`'s tests of a post cut, cut twice and nicked,
 but not of two cuts in a row, whose motion has not settled in their 2.5 s,
 nor of a cut into what moves.
 

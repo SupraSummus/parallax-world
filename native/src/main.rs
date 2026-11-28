@@ -11,9 +11,9 @@
 mod cut;
 mod engine;
 mod eye;
-mod fall;
 mod gpu;
 mod inspect;
+mod mechanics;
 mod settler;
 mod threads;
 mod view;
@@ -250,8 +250,8 @@ struct View {
     walker: Option<Walker>,
     /** Whether the window tells of the voxel under the pointer (inspect.rs), as the voxels engine finds it. */
     inspecting: bool,
-    /** What cuts set moving (fall.rs). */
-    falls: fall::Falls,
+    /** What cuts set moving (mechanics.rs). */
+    mechanics: mechanics::Mechanics,
 }
 
 impl View {
@@ -262,7 +262,7 @@ impl View {
         let day = Shared::new(Brightness { sky: 1.0, sun: 1.0, glow: 0.0 });
         let shared = args.light.and_then(|light| light.on(&day)).unwrap_or(day.clone());
         let world = World::new(made, Some(shared.clone()), args.threads.unwrap_or_else(threads::cores));
-        let falls = fall::Falls::new(world.world().clone());
+        let mechanics = mechanics::Mechanics::new(world.world().clone());
         let mut view = View {
             kind: args.engine,
             engine: args.engine.make(&world),
@@ -276,7 +276,7 @@ impl View {
             speed: args.speed,
             walker: None,
             inspecting: false,
-            falls,
+            mechanics,
         };
         view.apply(args);
         view
@@ -377,7 +377,7 @@ impl View {
 
     /**
      * A stroke where it looks (cut.rs): what it meets taken out of the
-     * world, and what that sets moving simulated (fall.rs).
+     * world, and what that sets moving simulated (mechanics.rs).
      * Whether it took anything.
      */
     fn cut(&mut self) -> bool {
@@ -385,7 +385,7 @@ impl View {
         let cut = cut::stroke(&self.world.level(0).grids, self.look.camera, forward);
         let took = self.world.take_out(cut.iter().copied());
         if took {
-            self.falls.post(fall::Job { cut });
+            self.mechanics.post(mechanics::Job { cut });
         }
         took
     }
@@ -598,8 +598,8 @@ impl window::Content for App {
             ui.heading("Parallax");
             ui.label(&self.stats);
             ui.label(format!("{} tiles being made", self.view.world.making()));
-            if !self.view.falls.found.is_empty() || self.view.falls.waiting > 0 {
-                ui.label(format!("{}{}", self.view.falls.found, if self.view.falls.waiting > 0 { " (moving…)" } else { "" }));
+            if !self.view.mechanics.found.is_empty() || self.view.mechanics.waiting > 0 {
+                ui.label(format!("{}{}", self.view.mechanics.found, if self.view.mechanics.waiting > 0 { " (moving…)" } else { "" }));
             }
             self.view.panel(ui);
             let t = self.times;
@@ -733,7 +733,7 @@ impl App {
             view.look.size = size;
         }
         view.light_look();
-        let falling = view.falls.falling(&mut view.world);
+        let moving = view.mechanics.moving(&mut view.world);
         let start = Instant::now();
         let frame = view.engine.frame(&view.look, &view.world);
         let framed = Instant::now();
@@ -753,7 +753,7 @@ impl App {
             self.sample =
                 Some(Sample { ms: [self.framing, ms(framed, Instant::now()), 0.0, 0.0, 0.0], t: self.steered, camera, owed, still });
         }
-        let more = arrived || frame.busy || view.world.making() > 0 || falling;
+        let more = arrived || frame.busy || view.world.making() > 0 || moving;
         (self.picture, self.stats) = (Some(frame.picture), frame.stats);
         let options = format!("{} {}", view.world_args, view.options());
         if let Some((file, start)) = &mut self.recording {
