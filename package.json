@@ -16,7 +16,7 @@
     "check": "pnpm lint && pnpm wasm && pnpm test"
   },
   "devDependencies": {
-    "vite": "^8.3.5"
+    "vite": "^8.3.8"
   },
   "packageManager": "pnpm@10.33.0"
 }
