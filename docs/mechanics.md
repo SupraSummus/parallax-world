@@ -128,3 +128,36 @@ and the changes show when due.
 - **Matter joined across faces.** What touches only at edges or corners falls apart.
 - **What is built stands at its material's strength.**
   Nothing is made stronger for having been generated.
+
+## By local rules
+
+`local/` is an experiment with this model's interface
+(`native/src/fall.rs` takes it by changing one import),
+in which a cell's matter moves by rules that read it and its neighbours only.
+Its tests are this crate's; they take minutes, so pnpm leaves them out
+(`cargo test --release -p local`).
+Taken by `fall.rs`, it passes its tests of a post cut, cut twice and nicked,
+but not of two cuts in a row, whose motion has not settled in their 2.5 s,
+nor of a cut into what moves.
+
+Every site holding matter is a cell: a rigid cube,
+where its matter lies and how it is turned its own.
+A cell asleep is as heavy as the world and holds still where its matter lies,
+so falling asleep and waking change nothing its neighbours feel.
+Between two cells is a spring.
+Two that hold on across a face are bonded by a beam through it, a cell long,
+its section as large as the share of the face that holds on,
+anchored in each cell's own frame:
+so a line of cells bends as beam theory has it, a block as its material,
+and what turns as a whole strains nothing.
+Two that do not hold on push apart as balls a cell across, with friction,
+no faster than `PUSH_APART`: contacts are not elastic.
+Every spring is damped alike and has a strength:
+past it, a bond breaks and a contact gives, as what crushes does.
+
+A step is explicit, every cell moved by its springs as they were,
+so a push crosses matter at the speed of sound,
+and a step is as short as sound takes to cross a cell, microseconds in wood:
+ten to over a hundred times slower than this model ([todo.md](todo.md), "Ideas").
+Positional steps (XPBD), each spring put right in turn, take long steps,
+but a beam out of a wall sagged a hundred times too far.

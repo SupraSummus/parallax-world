@@ -119,6 +119,9 @@ mechanics/src/               # Mechanics on the voxels (docs/mechanics.md), driv
 ├── element.rs               # A cell as a finite element: a co-rotated cube of eight nodes
 ├── solve.rs                 # Conjugate gradients, V-cycles over the octree
 └── tests.rs                 # Posts dropped, toppling, holding on or not; beams out of a wall, spinning
+local/src/                   # Mechanics by local rules, an experiment (docs/mechanics.md, "By local rules")
+├── lib.rs                   # Cells as rigid cubes, beams across the faces they hold on across; explicit steps
+└── tests.rs                 # mechanics/'s tests, on it
 statics/                     # Statics, an experiment (docs/statics.md): what stands
 ├── src/                     # Faces and beams (model.rs) on the octree 2^l·Z³ (lattice.rs);
 │                            # a level measured from the one below (gather.rs); the forces (bodies.rs)

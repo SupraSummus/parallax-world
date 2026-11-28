@@ -808,15 +808,18 @@ Numbers are for the forest at 1280×800, as measured when written.
   the finer near the cut or the eye, the coarser beyond,
   a coarser cell taking its parts' stiffness, as the solver's levels already do.
 - Mechanics that wakes by itself: whatever is edited, not only cut.
-- Mechanics of rigid pieces, statics only when something changes.
-  Wood bends by millimetres, a cell is 12.5 cm:
-  the bending solved each step shows nothing, and serves only to break welds.
-  Each welded piece could move as one body, meeting others by contacts,
-  and its stresses be solved, by the solver as it is,
-  once a cut, a hit or a contact changes what bears on it,
-  a weld past its strength splitting the piece.
-  Most of the cost, and what blows apart, is contacts between cells that bend.
-  It loses a tree swaying, and a hit's stress would come from its impulse.
+- Mechanics by local rules (`local/`, [mechanics.md](mechanics.md)) in place of `mechanics/`,
+  once it is fast enough: it has nothing written back, locking or co-rotated,
+  but its steps are as short as sound takes to cross a cell.
+  Each of these keeps every rule local:
+  a coarser level, sixteen times less work a level up;
+  threads waiting at a barrier, or a compute shader, a cell reading only its neighbours;
+  implicit steps relaxed round by round over the levels, as light is settled,
+  so that what spans more than a few cells is carried by the levels, not by sound.
+- Liquids on the lattice, by lattice Boltzmann:
+  each site's water streamed to its neighbours and mixed where it is, all local,
+  with a free surface; its steps need no real speed of sound, so are long.
+  Cells of `local/` would be what it flows around.
 - A cell's stiffness from the continuum (`statics/`).
   A cell's 15 beams with a section fitted (`SECTION`)
   could be a 36×36 stiffness of its faces, from E and ν,
