@@ -118,7 +118,7 @@ mechanics/src/               # Mechanics on the voxels (docs/mechanics.md), driv
 ├── lib.rs                   # Matter: cells welded across faces where both hold on, contacts; a step; hops
 ├── element.rs               # A cell as a finite element: a co-rotated cube of eight nodes
 ├── solve.rs                 # Conjugate gradients, V-cycles over the octree
-└── tests.rs                 # A post dropped, a post toppling, posts holding on or not, a beam out of a wall
+└── tests.rs                 # Posts dropped, toppling, holding on or not; beams out of a wall, spinning
 statics/                     # Statics, an experiment (docs/statics.md): what stands
 ├── src/                     # Faces and beams (model.rs) on the octree 2^l·Z³ (lattice.rs);
 │                            # a level measured from the one below (gather.rs); the forces (bodies.rs)
