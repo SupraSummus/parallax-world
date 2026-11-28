@@ -828,12 +828,14 @@ Numbers are for the forest at 1280×800, as measured when written.
 - Mechanics that wakes by itself: whatever is edited, not only cut.
 - Mechanics by local rules (`local/`, [mechanics.md](mechanics.md)) in place of `mechanics/`,
   once it is fast enough: it has nothing written back, locking or co-rotated,
-  but its steps are as short as sound takes to cross a cell.
-  Each of these keeps every rule local:
-  a coarser level, sixteen times less work a level up;
-  threads waiting at a barrier, or a compute shader, a cell reading only its neighbours;
+  but its rounds are as short as sound takes to cross a cell.
+  On threads it is still tens of times slower.
+  Its time is the springs' arithmetic, and a round a fifth longer is unstable,
+  so what is left is fewer rounds, or cheaper ones, each rule kept local:
   implicit steps relaxed round by round over the levels, as light is settled,
-  so that what spans more than a few cells is carried by the levels, not by sound.
+  so that what spans more than a few cells is carried by the levels, not by sound;
+  a coarser level, sixteen times less work a level up;
+  a compute shader, a cell reading only its neighbours, as the threads do.
 - Liquids on the lattice, by lattice Boltzmann:
   each site's water streamed to its neighbours and mixed where it is, all local,
   with a free surface; its steps need no real speed of sound, so are long.
