@@ -119,7 +119,8 @@ A cut (C) wakes what it sets moving,
 each cell carrying the level-0 sites of its cube.
 What bears is all wood; the worlds give no materials.
 Loose matter (leaves) is not simulated:
-it goes with the matter that bears nearest it.
+it goes with the matter that bears nearest it,
+and is crushed where it is carried onto matter that bears.
 It runs on a thread of its own, with the world as that thread has it,
 and the changes show when due.
 
@@ -135,9 +136,8 @@ and the changes show when due.
 and is to take its place once it is fast enough.
 In it, a cell's matter moves by rules that read it and its neighbours only.
 Its tests take minutes, so pnpm leaves them out (`cargo test --release -p local`).
-It passes `native/src/mechanics.rs`'s tests of a post cut, cut twice and nicked,
-but not of two cuts in a row, whose motion has not settled in their 2.5 s,
-nor of a cut into what moves.
+Of `native/src/mechanics.rs`'s tests it fails that of two cuts in a row;
+that of a tree of the forest is too slow to run on it.
 
 Every site holding matter is a cell: a rigid cube,
 where its matter lies and how it is turned its own.
@@ -155,6 +155,15 @@ A contact acts where the balls meet, half way between the cells, as a bond does,
 so what slides on something is turned by it.
 Every spring is damped alike and has a strength:
 past it, a bond breaks and a contact gives, as what crushes does.
+
+What it gets wrong comes from those contacts and that damping.
+A flat face stands on the tops of its balls:
+a nudge slides it half a cell into the hollows between them,
+a third of a cell lower, tilted where what it stands on is no wider.
+Friction only drags against sliding, so what is pushed creeps.
+Damped as a cell's swing is, what is many cells long rings for seconds.
+So a post dropped onto its stump bounces and comes to rest leaning,
+and, written back so, falls when the next cut wakes it.
 
 A step is explicit, in rounds of two phases, on threads (`local/src/crew.rs`):
 each spring works out what it does from its cells as they are,

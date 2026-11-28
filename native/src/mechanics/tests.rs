@@ -107,6 +107,29 @@ fn a_post_nicked_stands() {
 }
 
 /**
+ * Loose matter yields to what bears: a post's crown carried down beside
+ * its stump is crushed where it would lie on the stump or the ground,
+ * and carried back up leaves them whole.
+ */
+#[test]
+fn leaves_carried_onto_what_bears_are_crushed_and_leave_it_whole() {
+    let world = Arc::new(grove());
+    let mut field = Field::new(world.clone());
+    field.cut(layer(8).collect(), &mut |_| {});
+    let crown = (0..field.matter.cells.len()).max_by_key(|&i| field.matter.cells[i].what.loose.len()).expect("cells");
+    let (site, leaves) = (field.matter.cells[crown].site, field.matter.cells[crown].what.loose.len());
+    let around = (-16..20).flat_map(|x| (-16..20).flat_map(move |z| (-8..64).map(move |y| [x, y, z])));
+    let bore: Vec<[i64; 3]> = around.filter(|&s| field.view.kind(s) == Kind::Bearing).collect();
+    for to in [[-1, 0, -1], site] {
+        field.matter.cells[crown].site = to;
+        field.show(&mut []);
+    }
+    let lost = bore.iter().filter(|&&s| field.view.kind(s) != Kind::Bearing).count();
+    assert_eq!(lost, 0, "of {} sites that bore", bore.len());
+    assert!(field.matter.cells[crown].what.loose.len() < leaves, "crushed where it lay on what bears");
+}
+
+/**
  * A tree of the forest, notched 0.75 m over its foot on the side it
  * leans to, then cut through under the notch, falls towards it, its
  * leaves with it. Cut flat through, its weight over its stump, it would

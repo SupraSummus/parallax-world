@@ -78,8 +78,10 @@ struct View {
     tiles: FastMap<[i64; 3], Arc<VoxelGrid>>,
     level: u32,
     cubes: FastMap<[i64; 3], Cube>,
-    /** Sites of the level whose matter is awake, bearing or carried, where it was shown last: no site asleep holds it. */
+    /** Sites of the level of cells awake, where each was shown last: no site asleep holds it. */
     awake: FastSet<[i64; 3]>,
+    /** Sites of the level of the loose matter they carry, where it was shown last. */
+    carried: FastSet<[i64; 3]>,
 }
 
 impl View {
@@ -91,6 +93,7 @@ impl View {
             level,
             cubes: FastMap::default(),
             awake: FastSet::default(),
+            carried: FastSet::default(),
         }
     }
 
@@ -244,9 +247,9 @@ struct Carried {
 }
 
 impl Carried {
-    /** The sites of the level what it carries shows at, its cell at `site`. */
-    fn shows(&self, site: [i64; 3]) -> impl Iterator<Item = [i64; 3]> + '_ {
-        std::iter::once(site).chain(self.loose.iter().map(move |d| [site[0] + d[0], site[1] + d[1], site[2] + d[2]]))
+    /** The sites of the level the loose matter it carries lies at, its cell at `site`. */
+    fn loose_at(&self, site: [i64; 3]) -> impl Iterator<Item = [i64; 3]> + '_ {
+        self.loose.iter().map(move |d| [site[0] + d[0], site[1] + d[1], site[2] + d[2]])
     }
 }
 
@@ -400,7 +403,8 @@ impl Field {
         for c in &mut self.matter.cells {
             if c.what.shown.is_none() {
                 c.what.shown = Some((c.site, c.holds));
-                self.view.awake.extend(c.what.shows(c.site));
+                self.view.awake.insert(c.site);
+                self.view.carried.extend(c.what.loose_at(c.site));
             }
         }
     }
@@ -418,7 +422,7 @@ impl Field {
         while let Some(site) = queue.pop_front() {
             for next in about(site) {
                 if seen.insert(next)
-                    && !self.view.awake.contains(&next)
+                    && !self.view.carried.contains(&next)
                     && self.view.kind(next) == Kind::Loose
                     && let Some(c) = goes_with(next, cell, &mut self.view, reach)
                 {
@@ -472,8 +476,9 @@ impl Field {
     fn fell_asleep(&mut self, mut cells: Vec<Cell<Carried>>) {
         self.show(&mut cells);
         for c in &cells {
-            for site in c.what.shows(c.site) {
-                self.view.awake.remove(&site);
+            self.view.awake.remove(&c.site);
+            for site in c.what.loose_at(c.site) {
+                self.view.carried.remove(&site);
             }
         }
     }
@@ -482,7 +487,9 @@ impl Field {
      * What changed of the cells awake and `slept` since each was told:
      * each moved or holding on otherwise is emptied where it was, then put
      * where it is, what it carries on its cube's faces letting go across
-     * those it let go across; into the view, and to be told.
+     * those it let go across; into the view, and to be told. Each empties
+     * only what it put there, and the loose matter it carries is crushed
+     * where it would lie on matter that bears.
      */
     fn show(&mut self, slept: &mut [Cell<Carried>]) {
         let s = self.view.size();
@@ -493,20 +500,34 @@ impl Field {
         let cells: Vec<&mut Cell<Carried>> = cells.collect();
         for c in &cells {
             let (was, _) = c.what.shown.expect("told");
-            for site in c.what.shows(was) {
-                self.view.awake.remove(&site);
+            self.view.awake.remove(&was);
+            for site in c.what.loose_at(was) {
+                self.view.carried.remove(&site);
             }
-            for &(d, ..) in &c.what.sites {
-                changes.insert(at(was, d), (Held::default(), 0));
+            for (d, held, _) in &c.what.sites {
+                if self.view.held(at(was, *d)) == *held {
+                    changes.insert(at(was, *d), (Held::default(), 0));
+                }
             }
         }
         for c in cells {
+            let view = &mut self.view;
+            let mut bears = |zero: [i64; 3]| kind(&changes.get(&zero).map_or_else(|| view.held(zero), |h| h.0)) == Kind::Bearing;
+            let site = c.site;
+            c.what.loose.retain(|l| !cube([site[0] + l[0], site[1] + l[1], site[2] + l[2]], s).any(&mut bears));
+            // What it carries is kept where it lies in its own cube, or with loose matter not crushed.
+            let loose = &c.what.loose;
+            c.what.sites.retain(|(d, ..)| {
+                let l = d.map(|v| v.div_euclid(s));
+                l == [0; 3] || loose.contains(&l)
+            });
             for (d, held, holds) in &mut c.what.sites {
                 let face = on_face(*d, s);
                 *holds &= !(face & !c.holds);
                 changes.insert(at(c.site, *d), (*held, *holds));
             }
-            self.view.awake.extend(c.what.shows(c.site));
+            self.view.awake.insert(c.site);
+            self.view.carried.extend(c.what.loose_at(c.site));
             c.what.shown = Some((c.site, c.holds));
         }
         self.view.change(changes.iter().map(|(&k, &v)| (k, v)));
@@ -524,25 +545,28 @@ fn weigh(sites: &[([i64; 3], Held, Holds)], s: i64) -> (f64, f64) {
 }
 
 /**
- * The cell loose matter at `site` goes with: that of the most of the
- * matter that bears nearest it (in the first cube about it holding any,
- * within `reach`), if most of that is to wake.
+ * The cell loose matter at `site` goes with: the nearest of those in the
+ * first cube about it holding any matter that bears (within `reach`), if
+ * most of that is to wake.
  */
 fn goes_with(site: [i64; 3], cell: &FastMap<[i64; 3], u32>, view: &mut View, reach: i64) -> Option<u32> {
     for r in 1..=reach {
-        let (mut still, mut moves) = (0, FastMap::<u32, usize>::default());
+        let (mut still, mut moved, mut nearest) = (0, 0, None::<(i64, u32)>);
         let cube = (-r..=r).flat_map(|dx| (-r..=r).flat_map(move |dy| (-r..=r).map(move |dz| [dx, dy, dz])));
         for d in cube.filter(|d| d.iter().any(|v| v.abs() == r)) {
             let near = [site[0] + d[0], site[1] + d[1], site[2] + d[2]];
             match cell.get(&near) {
-                Some(&c) => *moves.entry(c).or_default() += 1,
+                Some(&c) => {
+                    moved += 1;
+                    let this = (d.iter().map(|v| v * v).sum::<i64>(), c);
+                    nearest = Some(nearest.map_or(this, |n| n.min(this)));
+                }
                 None if view.kind(near) == Kind::Bearing => still += 1,
                 None => {}
             }
         }
-        let moved: usize = moves.values().sum();
         if moved + still > 0 {
-            return (moved > still).then(|| moves.into_iter().max_by_key(|&(c, n)| (n, std::cmp::Reverse(c))).expect("some").0);
+            return nearest.filter(|_| moved > still).map(|(_, c)| c);
         }
     }
     None

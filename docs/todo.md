@@ -776,7 +776,8 @@ Numbers are for the forest at 1280×800, as measured when written.
   and a site woken is welded to its neighbours asleep,
   so a tree hit stands while they sleep.
 - **Loose matter is carried, not simulated**,
-  and may be left behind where a cell hops into its site.
+  may be left behind where a cell hops into its site,
+  and is crushed where it is carried onto what bears.
 - **A hop that is blocked waits**, and the matter shows a site behind
   where it is, till it is free.
 - **A step is solved to a share of its momentum** (`TOLERANCE`),
@@ -836,6 +837,12 @@ Numbers are for the forest at 1280×800, as measured when written.
   so that what spans more than a few cells is carried by the levels, not by sound;
   a coarser level, sixteen times less work a level up;
   a compute shader, a cell reading only its neighbours, as the threads do.
+  Its contacts too: cubes across faces, held by a spring till they slip,
+  would stand a face on a face, and hold it without creeping
+  ([mechanics.md](mechanics.md), "By local rules").
+  Then every spring would sit on a face, and what falls asleep could keep
+  each spring's strain instead of where its matter lies (`still`):
+  asleep at its site's middle, it would bear as it did, and wake as it slept.
 - Liquids on the lattice, by lattice Boltzmann:
   each site's water streamed to its neighbours and mixed where it is, all local,
   with a free surface; its steps need no real speed of sound, so are long.
