@@ -744,7 +744,8 @@ Numbers are for the forest at 1280×800, as measured when written.
 ## Mechanics
 
 - **It is slow.** A forest tree of 3000 cells, 7000 nodes, at level 0
-  simulates about six times slower than it falls, on one thread;
+  simulates about four times slower than it falls,
+  and over ten times once it lands, on one thread;
   the matrix products could share the cores.
 - **What a cut wakes is a rule of thumb** (`Around` in `native/src/fall.rs`):
   what is over it, near it, as much as `BUDGET` cells.
@@ -764,13 +765,26 @@ Numbers are for the forest at 1280×800, as measured when written.
   so what falls fast is left strained by the solve's error, and may break.
   Solved to a share of what changes instead,
   it stalls among loose pieces in contact: the V-cycles fit them badly.
+  And what is still takes as many rounds as what moves,
+  of a momentum that is nearly nothing;
+  solved no finer than a tenth of `SLOW`,
+  what starts to topple from rest never starts.
+- **What falls asleep is written back at its sites**,
+  up to `HOP` of a cell from where it lay,
+  so what stays awake beside it may overlap it at once,
+  and its contacts push a hundredfold past what crushes them,
+  more than `CONTACT_ROUNDS` settle:
+  a forest tree that has landed and lain still
+  can blow apart as half of it falls asleep.
 - **A tree of the forest stands on what bears nothing**:
-  its floor is loose matter metres deep, so a tree cut through falls through it,
-  lands far lower and breaks up, its crown's cells heavy with the leaves they carry,
-  and the solve crawls among the pieces.
+  its floor is loose matter metres deep, so a tree cut through falls through it
+  and lands far lower, its crown's cells heavy with the leaves they carry;
+  landed, its steps take several times the rounds its fall's do.
   `native/src/fall/tests.rs` follows its fall, not its landing.
-- **A post toppled off a stump breaks up as it slides off it**,
-  with nothing touching it, before it lands. Why is not known.
+- **A step's contacts settle in `CONTACT_ROUNDS` solves at most.**
+  In the few steps they do not,
+  a contact let go after the last solve has still held for the step, as glue,
+  and one let slide has held past friction.
 - **A cube's shear at its corners is partly the cube's own**
   (a trilinear element locks in bending):
   a weld judges shear by the mean over its face, and so not along an edge.
@@ -794,6 +808,15 @@ Numbers are for the forest at 1280×800, as measured when written.
   the finer near the cut or the eye, the coarser beyond,
   a coarser cell taking its parts' stiffness, as the solver's levels already do.
 - Mechanics that wakes by itself: whatever is edited, not only cut.
+- Mechanics of rigid pieces, statics only when something changes.
+  Wood bends by millimetres, a cell is 12.5 cm:
+  the bending solved each step shows nothing, and serves only to break welds.
+  Each welded piece could move as one body, meeting others by contacts,
+  and its stresses be solved, by the solver as it is,
+  once a cut, a hit or a contact changes what bears on it,
+  a weld past its strength splitting the piece.
+  Most of the cost, and what blows apart, is contacts between cells that bend.
+  It loses a tree swaying, and a hit's stress would come from its impulse.
 - A cell's stiffness from the continuum (`statics/`).
   A cell's 15 beams with a section fitted (`SECTION`)
   could be a 36×36 stiffness of its faces, from E and ν,

@@ -18,7 +18,7 @@ type V6 = [f64; 6];
 type M6 = [[f64; 6]; 6];
 
 /** Of the solve: how many rounds at most. */
-const ROUNDS: usize = 300;
+pub const ROUNDS: usize = 300;
 /** Parts few enough to solve directly. */
 const DIRECT: usize = 24;
 
@@ -122,7 +122,7 @@ fn times6t(m: &M6, v: &V6) -> V6 {
 }
 
 /** The inverse of a symmetric matrix that is positive or nearly so, by Cholesky; a dof it does not reach stays still. */
-fn inverse<const N: usize>(m: &[[f64; N]; N]) -> [[f64; N]; N] {
+pub fn inverse<const N: usize>(m: &[[f64; N]; N]) -> [[f64; N]; N] {
     let n = N;
     let mut a: Vec<f64> = m.iter().flatten().copied().collect();
     let l = cholesky(&mut a, n);
@@ -201,33 +201,43 @@ struct Coarse {
 
 /** The finer parts joined within each octree cell a level up (keys halved): each one's part, how many parts. */
 fn aggregate(keys: &[[i64; 3]], pairs: impl Iterator<Item = (usize, usize)>) -> (Vec<u32>, usize) {
-    let n = keys.len();
-    let mut up: Vec<usize> = (0..n).collect();
-    fn find(up: &mut [usize], mut i: usize) -> usize {
-        while up[i] != i {
-            up[i] = up[up[i]];
-            i = up[i];
-        }
-        i
-    }
     let parent = |k: [i64; 3]| k.map(|v| v.div_euclid(2));
-    for (i, j) in pairs {
-        if parent(keys[i]) == parent(keys[j]) {
-            let (a, b) = (find(&mut up, i), find(&mut up, j));
-            up[a.max(b)] = a.min(b);
-        }
+    sets(keys.len(), pairs.filter(|&(i, j)| parent(keys[i]) == parent(keys[j])))
+}
+
+/** The root of `i`'s set, in a union-find whose parents are `up`, halving the way there. */
+pub fn find(up: &mut [usize], mut i: usize) -> usize {
+    while up[i] != i {
+        up[i] = up[up[i]];
+        i = up[i];
+    }
+    i
+}
+
+/** Joins the sets of `i` and `j`, at the lesser root. */
+pub fn union(up: &mut [usize], i: usize, j: usize) {
+    let (r, s) = (find(up, i), find(up, j));
+    up[r.max(s)] = r.min(s);
+}
+
+/** The sets `n` things fall into, `joined` pairs in one: each thing's, numbered as first met; how many. */
+pub fn sets(n: usize, joined: impl Iterator<Item = (usize, usize)>) -> (Vec<u32>, usize) {
+    let mut up: Vec<usize> = (0..n).collect();
+    for (i, j) in joined {
+        union(&mut up, i, j);
     }
     let mut index = vec![u32::MAX; n];
-    let mut of = vec![0; n];
     let mut count = 0;
-    for i in 0..n {
-        let root = find(&mut up, i);
-        if index[root] == u32::MAX {
-            index[root] = count;
-            count += 1;
-        }
-        of[i] = index[root];
-    }
+    let of = (0..n)
+        .map(|i| {
+            let root = find(&mut up, i);
+            if index[root] == u32::MAX {
+                index[root] = count;
+                count += 1;
+            }
+            index[root]
+        })
+        .collect();
     (of, count as usize)
 }
 
@@ -356,7 +366,8 @@ impl Coarse {
 /**
  * The levels of a system: made for one, they serve any close to it (the
  * same cells, a little moved, contacts let go), solving it as well as
- * they fit it, never wrongly.
+ * they fit it, never wrongly, and say when they do not fit it at all
+ * (`solve`).
  */
 pub struct Solver {
     inverse: Vec<M3>,
@@ -475,17 +486,21 @@ impl Solver {
      * `tolerance` of `b`, each measured by what the preconditioner makes of
      * it (rᵀ P r, an energy): so a light node is held to its speed as a
      * heavy one is, not to a share of every force at once. How many rounds
-     * it took.
+     * it took; None if the levels do not fit `s` (not positive), as they
+     * may when made for another system: `x` is then no farther than it was.
      */
-    pub fn solve(&self, s: &System, b: &[V3], x: &mut [V3], tolerance: f64) -> usize {
+    pub fn solve(&self, s: &System, b: &[V3], x: &mut [V3], tolerance: f64) -> Option<usize> {
         let n = b.len();
         if n == 0 {
-            return 0;
+            return Some(0);
         }
         let measure = |r: &[V3], z: &[V3]| r.iter().zip(z).map(|(r, z)| dot(*r, *z)).sum::<f64>();
         let (mut z, mut scratch) = (vec![[0.0; 3]; n], vec![[0.0; 3]; n]);
         self.precondition(s, b, &mut z, &mut scratch);
         let target = tolerance * tolerance * measure(b, &z);
+        if target.is_nan() || target < 0.0 {
+            return None;
+        }
         let mut ax = vec![[0.0; 3]; n];
         s.times(x, &mut ax);
         let mut r: Vec<V3> = b.iter().zip(&ax).map(|(b, a)| sub(*b, *a)).collect();
@@ -494,13 +509,16 @@ impl Solver {
         let mut rz = measure(&r, &z);
         let mut ap = vec![[0.0; 3]; n];
         for round in 0..ROUNDS {
+            if rz < 0.0 {
+                return None;
+            }
             if rz <= target {
-                return round;
+                return Some(round);
             }
             s.times(&p, &mut ap);
             let pap: f64 = p.iter().zip(&ap).map(|(p, a)| dot(*p, *a)).sum();
             if pap <= 0.0 {
-                return round;
+                return Some(round);
             }
             let alpha = rz / pap;
             for i in 0..n {
@@ -515,6 +533,6 @@ impl Solver {
                 p[i] = add(z[i], scale(p[i], beta));
             }
         }
-        ROUNDS
+        Some(ROUNDS)
     }
 }

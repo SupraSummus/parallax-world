@@ -16,9 +16,9 @@
 mod element;
 mod solve;
 
-use element::{CORNERS, Element};
+use element::{CORNERS, Element, matrix, turn};
 use lattice::{FastMap, FastSet, Holds, opposite};
-use solve::{M3, Solver, System, V3, add, dot, scale, sub, times};
+use solve::{M3, Solver, System, V3, add, cross, dot, find, scale, sets, sub, times, union};
 
 const GRAVITY: f64 = 9.81;
 
@@ -163,6 +163,20 @@ struct Contact {
     used: f64,
 }
 
+/**
+ * The solver's levels, kept from step to step: made for the nodes as they
+ * are, while the contacts a step finds are those it found (`touching`)
+ * and none lets go, and while a step's first solve (`last`) takes no
+ * more than a round past the `first` they served. Made anew, they cost
+ * about as much as several rounds.
+ */
+struct Kept {
+    solver: Solver,
+    touching: Vec<(u32, Other)>,
+    first: usize,
+    last: usize,
+}
+
 /** The sites about a site, across its faces, edges and corners: what it may meet. */
 pub fn about(s: [i64; 3]) -> impl Iterator<Item = [i64; 3]> {
     (0..27).filter(|&d| d != 13).map(move |d| [s[0] + d % 3 - 1, s[1] + d / 3 % 3 - 1, s[2] + d / 9 - 1])
@@ -217,6 +231,8 @@ pub struct Matter<T> {
     slots: Vec<[u32; 64]>,
     /** Sites asleep asked to wake. */
     waking: FastSet<[i64; 3]>,
+    /** The solver's levels, kept from step to step while they serve (`Kept`). */
+    kept: Option<Kept>,
     /** Seconds simulated. */
     pub time: f64,
     /** Rounds of the solve, all steps; welds broken. */
@@ -242,6 +258,7 @@ impl<T> Matter<T> {
             pattern: Vec::new(),
             slots: Vec::new(),
             waking: FastSet::default(),
+            kept: None,
             time: 0.0,
             rounds: 0,
             broke: 0,
@@ -342,24 +359,15 @@ impl<T> Matter<T> {
      * cell's corners there, `old` its nodes), or at its lattice point.
      */
     fn join(&mut self, before: &[[u32; 8]], old: &[Node]) {
+        self.kept = None;
         let n = self.cells.len();
         let mut up: Vec<usize> = (0..8 * n).collect();
-        fn find(up: &mut [usize], mut i: usize) -> usize {
-            while up[i] != i {
-                up[i] = up[up[i]];
-                i = up[i];
-            }
-            i
-        }
         let mut held = vec![false; 8 * n];
         for w in &self.welds {
             for &(a, b) in &w.corners {
                 let p = 8 * w.i as usize + a as usize;
                 match w.j {
-                    Other::Cell(j) => {
-                        let (r, s) = (find(&mut up, p), find(&mut up, 8 * j as usize + b as usize));
-                        up[r.max(s)] = r.min(s);
-                    }
+                    Other::Cell(j) => union(&mut up, p, 8 * j as usize + b as usize),
                     Other::Still(_) => held[p] = true,
                 }
             }
@@ -551,13 +559,16 @@ impl<T> Matter<T> {
      * and that is gone over the face.
      */
     fn used(&self) -> Vec<f64> {
+        // Each cell's stress at each of its corners, once.
+        let stress: Vec<[M3; 8]> =
+            (0..self.cells.len()).map(|i| std::array::from_fn(|c| scaled(&self.elements[i].stress(c, self.h), self.e(i)))).collect();
         // As cell `i` bears it, at its corners of the face: the first of each pair, or the second.
         let across = |i: usize, second: bool, w: &Weld| {
             let m = &w.material;
             let (mut normal, mut slide) = (0.0f64, [0.0; 3]);
             for &(a, b) in &w.corners {
                 let c = if second { b } else { a };
-                let t = times(&scaled(&self.elements[i].stress(c as usize, self.h), self.e(i)), w.n);
+                let t = times(&stress[i][c as usize], w.n);
                 let along = dot(t, w.n);
                 normal = normal.max(along / m.tension).max(-along / m.compression);
                 slide = add(slide, sub(t, scale(w.n, along)));
@@ -580,35 +591,40 @@ impl<T> Matter<T> {
      * site's but while a hop waits.
      */
     fn contacts(&self, lattice: &mut dyn Lattice) -> Vec<Contact> {
+        let middles: Vec<V3> = (0..self.cells.len()).map(|i| self.middle(i)).collect();
         let mut contacts = Vec::new();
         let mut met: FastSet<(u32, u32)> = FastSet::default();
         for (i, c) in self.cells.iter().enumerate() {
-            let p = self.middle(i);
+            let p = middles[i];
             let here = p.map(|v| (v / self.h).floor() as i64);
             // Not the site it is in, if not its own: so deep in it, which way it would be pushed out is anyone's guess.
             for s in about(here) {
-                let (j, other) = match self.at.get(&s) {
-                    Some(&j) if j as usize != i && met.insert((j.min(i as u32), j.max(i as u32))) => {
-                        (Other::Cell(j), self.cells[j as usize].material)
-                    }
+                // How far it is first, the cheapest to ask: a pair too far is too far from either side.
+                let (j, between) = match self.at.get(&s) {
+                    Some(&j) if j as usize != i => (Other::Cell(j), sub(middles[j as usize], p)),
                     Some(_) => continue,
-                    None => match lattice.asleep(s) {
-                        Some(m) => (Other::Still(s), m),
+                    None => (Other::Still(s), sub(self.site_middle(s), p)),
+                };
+                let length = dot_len(between);
+                if !(length < self.h * TOUCH && length > 1e-9) {
+                    continue;
+                }
+                let other = match j {
+                    Other::Cell(j) if met.insert((j.min(i as u32), j.max(i as u32))) => self.cells[j as usize].material,
+                    Other::Cell(_) => continue,
+                    Other::Still(s) => match lattice.asleep(s) {
+                        Some(m) => m,
                         None => continue,
                     },
                 };
                 if self.welded.contains(&(i as u32, j)) {
                     continue;
                 }
-                let between = sub(self.other(j), p);
-                let length = dot_len(between);
-                if length < self.h * TOUCH && length > 1e-9 {
-                    let meet = c.material.meet(other);
-                    let most = CRUSH * meet.compression.min(meet.shear / FRICTION) * self.h * self.h;
-                    let k = meet.e * self.h;
-                    let n = scale(between, 1.0 / length);
-                    contacts.push(Contact { i: i as u32, j, n, overlap: self.h - length, k, t: k, most, used: 0.0 });
-                }
+                let meet = c.material.meet(other);
+                let most = CRUSH * meet.compression.min(meet.shear / FRICTION) * self.h * self.h;
+                let k = meet.e * self.h;
+                let n = scale(between, 1.0 / length);
+                contacts.push(Contact { i: i as u32, j, n, overlap: self.h - length, k, t: k, most, used: 0.0 });
             }
         }
         contacts
@@ -714,17 +730,30 @@ impl<T> Matter<T> {
     fn solve_step(&mut self, dt: f64, lattice: &mut dyn Lattice) -> Vec<Contact> {
         let mut contacts = self.contacts(lattice);
         let mut v: Vec<V3> = self.nodes.iter().filter(|n| !n.held).map(|n| n.v).collect();
-        let mut solver: Option<Solver> = None;
+        let touching: Vec<(u32, Other)> = contacts.iter().map(|c| (c.i, c.j)).collect();
+        let mut kept = self.kept.take().filter(|k| k.touching == touching && k.last <= k.first + 1);
         let free = &self.free;
         let speeds = |v: &[V3]| -> Vec<V3> { free.iter().map(|&u| if u == NONE { [0.0; 3] } else { v[u as usize] }).collect() };
         let (elements, b) = self.system(dt);
-        for _ in 0..CONTACT_ROUNDS {
+        for round in 0..CONTACT_ROUNDS {
             let (system, b) = self.with_contacts(dt, &elements, &b, &contacts);
-            // The levels made once a step serve its rounds: they solve as well as they fit, never wrongly.
-            let solver = solver.get_or_insert_with(|| Solver::new(&system, self.h));
-            self.rounds += solver.solve(&system, &b, &mut v, TOLERANCE);
+            // Levels kept serve as well as they fit, never wrongly; made anew, they serve the rounds after.
+            let solved = kept.as_ref().and_then(|k| k.solver.solve(&system, &b, &mut v, TOLERANCE));
+            let rounds = solved.unwrap_or_else(|| {
+                let solver = Solver::new(&system, self.h);
+                let rounds = solver.solve(&system, &b, &mut v, TOLERANCE).unwrap_or(solve::ROUNDS);
+                kept = Some(Kept { solver, touching: touching.clone(), first: rounds, last: rounds });
+                rounds
+            });
+            if round == 0
+                && let Some(k) = &mut kept
+            {
+                k.last = rounds;
+            }
+            self.rounds += rounds;
             let all = speeds(&v);
             let mut changed = false;
+            let before = contacts.len();
             contacts.retain_mut(|c| {
                 let rel = sub(self.velocity(c.j, &all), self.velocity(Other::Cell(c.i), &all));
                 let along = dot(rel, c.n);
@@ -753,12 +782,64 @@ impl<T> Matter<T> {
             if !changed {
                 break;
             }
+            // Levels made with a contact let go fit what is left badly, as if it still held what it parts.
+            if contacts.len() < before {
+                kept = None;
+            }
         }
-        for (n, v) in self.nodes.iter_mut().zip(speeds(&v)) {
-            n.v = v;
-            n.x = add(n.x, scale(v, dt));
-        }
+        self.kept = kept;
+        self.advance(&speeds(&v), dt);
         contacts
+    }
+
+    /**
+     * Moves the nodes at speeds `v` for `dt`: each piece's turn as a whole
+     * exactly, and only what bends it along a line. Moved along a line,
+     * what turns would be stretched each step by its turn in the step
+     * squared, which damping lets go of only slowly: a post toppling would
+     * break. A piece turns about its middle, or, held, about its held
+     * nodes, which hold still.
+     */
+    fn advance(&mut self, v: &[V3], dt: f64) {
+        let (piece, count) = sets(self.nodes.len(), self.corners.iter().flat_map(|c| c[1..].iter().map(|&k| (c[0] as usize, k as usize))));
+        // Of each piece, its free nodes by mass and its held nodes by count: how much, and where and how fast, summed.
+        let mut of = vec![[(0.0, [0.0; 3], [0.0; 3]); 2]; count];
+        for (k, n) in self.nodes.iter().enumerate() {
+            let p = &mut of[piece[k] as usize][usize::from(n.held)];
+            let w = if n.held { 1.0 } else { n.mass };
+            *p = (p.0 + w, add(p.1, scale(n.x, w)), add(p.2, scale(v[k], w)));
+        }
+        let (middle, speed): (Vec<V3>, Vec<V3>) = of
+            .iter()
+            .map(|&[free, held]| {
+                let (w, x, v) = if held.0 > 0.0 { held } else { free };
+                (scale(x, 1.0 / w), scale(v, 1.0 / w))
+            })
+            .unzip();
+        let mut spin = vec![[0.0; 3]; count];
+        let mut inertia = vec![[[0.0; 3]; 3]; count];
+        for (k, n) in self.nodes.iter().enumerate() {
+            let p = piece[k] as usize;
+            let r = sub(n.x, middle[p]);
+            spin[p] = add(spin[p], scale(cross(r, sub(v[k], speed[p])), n.mass));
+            for i in 0..3 {
+                for j in 0..3 {
+                    inertia[p][i][j] += n.mass * (if i == j { dot(r, r) } else { 0.0 } - r[i] * r[j]);
+                }
+            }
+        }
+        let omega: Vec<V3> = (0..count).map(|p| times(&solve::inverse(&inertia[p]), spin[p])).collect();
+        let turned: Vec<M3> = omega.iter().map(|&w| matrix(turn(scale(w, dt)))).collect();
+        for (k, n) in self.nodes.iter_mut().enumerate() {
+            let p = piece[k] as usize;
+            let relative = sub(v[k], speed[p]);
+            n.v = add(speed[p], times(&turned[p], relative));
+            if !n.held {
+                let r = sub(n.x, middle[p]);
+                let bends = sub(relative, cross(omega[p], r));
+                n.x = add(add(middle[p], scale(speed[p], dt)), times(&turned[p], add(r, scale(bends, dt))));
+            }
+        }
     }
 
     /**
