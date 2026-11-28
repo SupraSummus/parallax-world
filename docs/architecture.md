@@ -176,6 +176,8 @@ and if one does, it must not hide.
 One ray is traced for every 4 × 4 pixels;
 each pixel takes the nearest of the voxels its four nearest samples met
 that its own ray enters, so edges stay sharp.
+The pointer's ray is marched in a pass of its own:
+a march in the resolving pass kept it from running as many pixels at once.
 See-through voxels add up in the order the ray meets them,
 each stopping `1 − (1 − alpha)^path` of what is left,
 its path the ray's through the voxel, in the level's units,

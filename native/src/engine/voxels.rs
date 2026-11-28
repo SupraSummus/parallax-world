@@ -1293,6 +1293,7 @@ pub struct Marcher {
     reading: Reading,
     layouts: [wgpu::BindGroupLayout; 3],
     pipelines: [wgpu::RenderPipeline; 3],
+    probing: wgpu::ComputePipeline,
     keeper: Keeper,
     /** The windows as the GPU holds them: their shapes, the slots held and free, their radius (the last Patch's). */
     shapes: [Shape; GRID_LEVELS],
@@ -1355,7 +1356,12 @@ impl Marcher {
             buffer("told", size_of::<Told>(), storage | wgpu::BufferUsages::COPY_SRC),
         ];
         let readback = buffer("read", ASKED_WORDS * 4 + size_of::<Told>(), wgpu::BufferUsages::MAP_READ);
-        let entry = |binding: u32, ty| wgpu::BindGroupLayoutEntry { binding, visibility: wgpu::ShaderStages::FRAGMENT, ty, count: None };
+        let entry = |binding: u32, ty| wgpu::BindGroupLayoutEntry {
+            binding,
+            visibility: wgpu::ShaderStages::FRAGMENT | wgpu::ShaderStages::COMPUTE,
+            ty,
+            count: None,
+        };
         let buffer_type = |ty| wgpu::BindingType::Buffer { ty, has_dynamic_offset: false, min_binding_size: None };
         let read = buffer_type(wgpu::BufferBindingType::Storage { read_only: true });
         let write = buffer_type(wgpu::BufferBindingType::Storage { read_only: false });
@@ -1417,6 +1423,19 @@ impl Marcher {
             pipeline("resolve_fragment", &layouts[1], &[PICTURE]),
             pipeline("show_fragment", &layouts[2], &[format]),
         ];
+        // The pointer's probe, a pass of its own, bound as the resolving one.
+        let probing = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("probe"),
+            layout: Some(&device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: None,
+                bind_group_layouts: &[Some(&layouts[1])],
+                immediate_size: 0,
+            })),
+            module: &shader,
+            entry_point: Some("probe"),
+            compilation_options: Default::default(),
+            cache: None,
+        });
         let windows = Windows::new(pool as usize, lit);
         let (shapes, held, radius) = (std::array::from_fn(|l| windows.windows[l].shape()), [0, pool as usize], windows.radius);
         let (keeper, reading, heard) = (Keeper::new(windows), Reading::Idle, None);
@@ -1429,6 +1448,7 @@ impl Marcher {
             reading,
             layouts,
             pipelines,
+            probing,
             keeper,
             shapes,
             held,
@@ -1518,6 +1538,12 @@ impl Marcher {
             pass.set_pipeline(pipeline);
             pass.set_bind_group(0, group, &[]);
             pass.draw(0..4, 0..1);
+        }
+        if look.pointer.is_some() {
+            let mut pass = encoder.begin_compute_pass(&Default::default());
+            pass.set_pipeline(&self.probing);
+            pass.set_bind_group(0, &targets.groups[1], &[]);
+            pass.dispatch_workgroups(1, 1, 1);
         }
         if matches!(self.reading, Reading::Idle) {
             let mut offset = 0;

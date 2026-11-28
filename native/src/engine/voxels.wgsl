@@ -663,9 +663,6 @@ fn agreeing(hit: vec4u, k: i32, w: f32, seen: vec4u, only: i32) -> f32 {
 fn resolve_fragment(in: Screen) -> @location(0) vec4f {
   let position = in.position.xy;
   let d = ray_at(position);
-  if all(floor(position) == globals.pointer) {
-    probe(d);
-  }
   let ray = ray_of(d);
   let last = vec2i(textureDimensions(sample_hits)) - 1;
   let at = position / f32(FACTOR) - 0.5;
@@ -699,8 +696,10 @@ fn resolve_fragment(in: Screen) -> @location(0) vec4f {
   }
   let p = clamp(base + vec2i(best & 1, best >> 1), vec2i(0), last);
   let colours = textureLoad(sample_colours, p, 0).x;
-  var behind = sky(d);
-  if best >= 0 {
+  var behind: vec3f;
+  if best < 0 {
+    behind = sky(d);
+  } else {
     seen = select(select(h0, h1, best == 1), select(h2, h3, best == 3), best >= 2);
     var nearest = c.nearest;
     if only >= 0 {
@@ -737,8 +736,11 @@ fn record(level: u32, s: vec3i, through: vec3f, path: f32) {
   told.probe.path += path;
 }
 
-// Writes down what the ray along `d` meets (Told's), marched as the samples' rays are.
-fn probe(d: vec3f) {
+// Writes down what the ray through the pointer's pixel meets (Told's), marched as the samples' rays are:
+// a pass of its own, so that the resolving one holds no march.
+@compute @workgroup_size(1)
+fn probe() {
+  let d = ray_at(globals.pointer + 0.5);
   told.probe = Probe();
   recording = true;
   let hit = march(d);
