@@ -69,7 +69,7 @@ so turning asks for what comes into view
 (a body walking asks for the ground around it, seen or not).
 Tiles are kept as far around the camera as the engine may ask for them,
 whichever way it looks (`Wants`), and dropped farther:
-`voxels::READ`, as far as its rays read;
+`voxels::most`, as far as its rays read;
 `Lod::grid_reach`, as far as each grid's chunks read.
 A tile never changes once made; it may be replaced.
 A world's edits (`worldgen/src/edits.rs`) are what its level-0 sites hold
@@ -127,7 +127,7 @@ all of it copied to the GPU in that frame or none,
 so a frame waits for no step, and the GPU holds the windows a frame or two late.
 A picture drawn till settled (headless, and the tests) waits for each patch.
 The levels' balls share one radius, in each level's own bricks,
-as large as the pool holds:
+as large as the pool holds and rays need (below):
 short of slots, all shrink, every level read less far,
 and with room to spare they grow back.
 The pool is bounded; what does not fit shows coarser, sooner.
@@ -173,8 +173,14 @@ out of it, a ray takes the next level, from where it would have,
 so open sky costs a ray a few steps a level.
 A ray that runs out of steps shows magenta: a march must not stick,
 and if one does, it must not hide.
-One ray is traced for every 4 × 4 pixels;
-each pixel takes the nearest of the voxels its four nearest samples met
+One ray is traced for every few pixels each way
+(`--apart`; a window's pixels are its points),
+and a level is read no farther than its voxels show as wide as rays are apart,
+so some ray meets each voxel that shows (`most`):
+the farther apart, the fewer the rays and the tiles, and the coarser the voxels.
+The render distance comes first:
+no level takes over from the coarsest, so the balls are as large as it needs.
+Each pixel takes the nearest of the voxels its four nearest samples met
 that its own ray enters, so edges stay sharp.
 The pointer's ray is marched in a pass of its own:
 a march in the resolving pass kept it from running as many pixels at once.

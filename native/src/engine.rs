@@ -126,6 +126,8 @@ pub struct Look {
     /** Viewing distance over a cell's thickness, and how many levels finer than its cell its voxels are (bake's Lod). */
     pub detail: f64,
     pub shift: i32,
+    /** For the voxels engine, pixels apart its rays are, each way, as `size` counts them: a voxel shows at least as wide (voxels.rs's `most`). */
+    pub apart: u32,
     /** Whether to draw the seams between faces over the picture, and what to paint voxels in. */
     pub seams: bool,
     pub colours: Colours,
@@ -154,6 +156,7 @@ impl Look {
             eye: Eye::default(),
             detail: 2f64.powf(3.25),
             shift: 3,
+            apart: 4,
             seams: false,
             colours: Colours::Voxels,
             hides: true,

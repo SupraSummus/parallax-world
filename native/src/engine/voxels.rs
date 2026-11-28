@@ -1,17 +1,18 @@
 //! The voxels engine: the view as rays through the world's own tiles
-//! (voxels.wgsl), no chunks, nothing baked. A ray goes from voxel to voxel across their faces, each
-//! level as far as its window holds (reach), then on in the next coarser
-//! one. One ray is traced for every FACTOR × FACTOR pixels; each pixel then
-//! takes the nearest of the voxels its four nearest samples met that its
-//! own ray enters. See-through voxels add up along the samples' rays, in
-//! the order met, each by the ray's path through it.
+//! (voxels.wgsl), no chunks, nothing baked. A ray goes from voxel to
+//! voxel across their faces, each level as far as its window holds
+//! (reach), then on in the next coarser one. One ray is traced for every
+//! `apart` × `apart` pixels (Look's); each pixel then takes the nearest of
+//! the voxels its four nearest samples met that its own ray enters.
+//! See-through voxels add up along the samples' rays, in the order met,
+//! each by the ray's path through it.
 //!
 //! The GPU holds, of each level, the bricks of a ball around the eye's
 //! brick (Ball) in a window of WINDOW³ bricks, moved brick by brick: a
 //! table of their slots in a pool, a torus (a brick's entry is at its
 //! coordinates modulo WINDOW), so that the window moves without moving the
 //! rest. The levels' balls share a radius, as large as the pool holds
-//! (Windows). Beside it, which cubes of bricks, octree cells above
+//! (Windows) and rays need, apart as they are (most). Beside it, which cubes of bricks, octree cells above
 //! them, no voxel meets (CELLS): rays go across those at once. Tiles
 //! never change once made, only are replaced (an edit, a relight, light
 //! settling), so a brick is uploaded once, and its slot freed as it
@@ -66,8 +67,6 @@ const BRICK_SHIFT: u32 = 3;
 const BRICK: i32 = 1 << BRICK_SHIFT;
 /** Sites a brick holds: a word each, of its look, and lit, of its light. */
 const BRICK_SITES: usize = (BRICK * BRICK * BRICK) as usize;
-/** Pixels each way per ray traced. */
-const FACTOR: u32 = 4;
 /** Bytes of bricks the pool holds at most. */
 const POOL_BYTES: u64 = 256 << 20;
 
@@ -76,8 +75,6 @@ const STEP: usize = 64;
 
 /** The largest radius of a window's ball (Ball): its bricks, at most RADIUS + 1 from the middle each way, within the window. */
 const RADIUS: i32 = WINDOW / 2 - 2;
-/** How far around the eye rays read, in a level's sites, at most: as far as a ball of RADIUS holds (reach_of). */
-const READ: f64 = (RADIUS * BRICK) as f64;
 
 const TABLE: usize = (WINDOW * WINDOW * WINDOW) as usize;
 /**
@@ -118,14 +115,34 @@ fn reach_of(radius: i32) -> f64 {
     ((radius * BRICK) as f64 - 2.0).max(0.0)
 }
 
+/**
+ * The largest radius of the windows' balls as `look` sees: rays read a
+ * level no farther than its voxels show as wide as they are apart
+ * (Look's `apart`), so that some ray meets each voxel that shows; but as
+ * far as the coarsest level, which none takes over from, reaches the
+ * render distance; and no farther than a window holds.
+ */
+fn most(look: &Look) -> i32 {
+    // The radius of reach_of(radius) = sites.
+    let radius = |sites: f64| (sites + 2.0) / f64::from(BRICK);
+    let apart = radius(look.view().focal / f64::from(look.apart)).floor();
+    let far = radius(look.far / (1u64 << (GRID_LEVELS - 1)) as f64).ceil();
+    (apart.max(far) as i32).clamp(1, RADIUS)
+}
+
+/** Pixels of a picture of `pixels` apart rays are, each way: Look's `apart` counts its own (a window's are points). */
+fn apart(look: &Look, pixels: [u32; 2]) -> f32 {
+    (f64::from(look.apart) * f64::from(pixels[0]) / look.size[0]) as f32
+}
+
 /** How far rays read level `level`, in world units, its window's ball of `radius`, if they reach `far` in all. */
 fn reach(level: usize, radius: i32, far: f64) -> f64 {
     (reach_of(radius) * (1u64 << level) as f64).min(far)
 }
 
-/** How many levels rays read to reach `far`: up to the first that does, or all. */
-fn levels(far: f64) -> usize {
-    (0..GRID_LEVELS).find(|&l| reach(l, RADIUS, far) >= far).map_or(GRID_LEVELS, |l| l + 1)
+/** How many levels rays read to reach `far`, the windows' balls of `radius`: up to the first that does, or all. */
+fn levels(radius: i32, far: f64) -> usize {
+    (0..GRID_LEVELS).find(|&l| reach(l, radius, far) >= far).map_or(GRID_LEVELS, |l| l + 1)
 }
 
 /** The cell of scale `j` that brick `b` is in. */
@@ -259,11 +276,12 @@ impl Default for Voxels {
 
 impl Engine for Voxels {
     fn frame(&mut self, look: &Look, world: &World) -> Frame {
-        let count = levels(look.far);
+        let most = most(look);
+        let count = levels(most, look.far);
         let levels: Vec<_> = (0..count).map(|l| world.level(l).clone()).collect();
         let tiles: usize = levels.iter().map(|l| l.tiles.len()).sum();
         let lit = if look.light.is_some() { Lit::Bricks } else { Lit::Not };
-        let reach = std::array::from_fn(|l| (l < count).then_some(READ));
+        let reach = std::array::from_fn(|l| (l < count).then_some(f64::from(most * BRICK)));
         if let Some(mut bricks) = self.asked.1.try_iter().last() {
             // Nearest first in each level's own sites, the finer first as near: as rays read the levels. Those of no
             // tile before those to light: a tile is little work next to its light, which no ray asks for till it is made.
@@ -291,6 +309,10 @@ impl Engine for Voxels {
             busy: busy || !same,
             stats: format!("{tiles} tiles"),
         }
+    }
+
+    fn panel(&mut self, ui: &mut egui::Ui, look: &mut Look) {
+        ui.add(egui::Slider::new(&mut look.apart, 1..=16).text("Rays Apart (pixels)"));
     }
 }
 
@@ -335,7 +357,8 @@ struct Globals {
     view: [[f32; 4]; 3],
     /** The light the eye shows white: unlit, 1, the light as it is. */
     white: f32,
-    _pad: u32,
+    /** Pixels of the picture apart its rays are, each way: Look's `apart`, in its pixels (`apart`). */
+    apart: f32,
     /** The pixel whose ray to probe (Probe), negative if none. */
     pointer: [f32; 2],
 }
@@ -363,7 +386,7 @@ impl Globals {
             horizon: rgba(SKY_HORIZON),
             view: view_basis(look.yaw, look.pitch).map(column),
             white,
-            _pad: 0,
+            apart: apart(look, pixels),
             // Within the picture, so that a frame with a pointer always probes.
             pointer: look
                 .pointer
@@ -918,13 +941,14 @@ type Read = (u64, [Option<Ball>; GRID_LEVELS], Vec<(usize, u32)>);
 
 /**
  * What a draw has the windows do (Windows::step): hold the `levels`'
- * tiles around `eye`; and what rays asked for, if read back since the
+ * tiles around `eye`, in balls of radius `most` at most (`most`); and what rays asked for, if read back since the
  * last: at which of the windows' changes, and the words that are not 0,
  * each with its place; `asked` is told the bricks.
  */
 struct Task {
     levels: Vec<Arc<Level>>,
     eye: Vec3,
+    most: i32,
     read: Option<Read>,
     asked: Sender<Asked>,
 }
@@ -973,7 +997,7 @@ struct Patch {
 /**
  * The levels' windows and the pool of slots they share. The windows are
  * balls of one radius, each in its own level's bricks, as large as the
- * pool holds, up to RADIUS: short of slots, all shrink a brick, each level
+ * pool holds, up to as far as rays read (Task's `most`): short of slots, all shrink a brick, each level
  * read as much less far, its rays taking the next coarser one sooner. With
  * room to spare (an eighth of the pool), they grow a brick a sync, if
  * the bricks that gains fit. A sync steps one window, each in turn: what
@@ -1038,12 +1062,20 @@ impl Windows {
      * Steps a level's window toward its tiles in `levels` (none past them)
      * around `eye` (next's, retarget's), and has every window place what
      * rays asked for that is lit now (ripe's); then decides
-     * the radius and places what that holds. Returns the bricks to upload
+     * the radius, `most` at most, and places what that holds. Returns the bricks to upload
      * (every slot freed before any is taken: each once) and which windows
      * changed.
      */
-    fn sync(&mut self, levels: &[Arc<Level>], eye: Vec3) -> (Vec<Added>, [bool; GRID_LEVELS]) {
+    fn sync(&mut self, levels: &[Arc<Level>], eye: Vec3, most: i32) -> (Vec<Added>, [bool; GRID_LEVELS]) {
         let (mut found, mut added) = (vec![Vec::new(); GRID_LEVELS], Vec::new());
+        // Past what rays read: every window down to it.
+        if self.radius > most {
+            self.radius = most;
+            for window in &mut self.windows {
+                window.resize(most, &mut Vec::new(), &mut self.pool);
+            }
+            self.growing = 0;
+        }
         if let Some(level) = self.next(levels, eye) {
             let tiles = levels.get(level).unwrap_or(&self.none);
             found[level] = self.windows[level].retarget(level, tiles, eye, level < levels.len(), self.radius, &mut self.pool);
@@ -1061,7 +1093,7 @@ impl Windows {
         }
         self.place(pending, true, &mut added);
         // Room to spare: every window a brick more, if what that gains would fit with room still, were it all asked for.
-        if self.radius < RADIUS && self.pool.free.len() >= self.growing.max(self.margin) {
+        if self.radius < most && self.pool.free.len() >= self.growing.max(self.margin) {
             let radius = self.radius + 1;
             let shells: Vec<_> = self.windows.iter().map(|w| w.shell(radius)).collect();
             let needs = self.needs(&shells);
@@ -1109,7 +1141,7 @@ impl Windows {
     /** Does `task`: hears what was read back, syncs, and packs what that changed. */
     fn step(&mut self, task: Task) -> Patch {
         let read = task.read.map(|(changes, seen, words)| (changes, self.hear(&seen, &words, &task.asked)));
-        let (added, changed) = self.sync(&task.levels, task.eye);
+        let (added, changed) = self.sync(&task.levels, task.eye, task.most);
         let next = &self.pool.next;
         let bricks = [
             Words::of(&added, BRICK_SITES, |a| words(&a.tile.grid, a.first, a.part)),
@@ -1211,7 +1243,9 @@ const SAMPLE_COLOURS: wgpu::TextureFormat = wgpu::TextureFormat::Rgba32Uint;
 
 /** Textures as big as the picture: the samples', the picture, and the groups binding them. */
 struct Targets {
+    /** The picture's pixels, and how many apart its samples are (`apart`). */
     pixels: [u32; 2],
+    apart: f32,
     samples: [wgpu::Texture; 2],
     picture: wgpu::Texture,
     groups: [wgpu::BindGroup; 3],
@@ -1314,7 +1348,7 @@ pub struct Marcher {
 /** voxels.wgsl, with the constants it shares with this file. */
 fn shader() -> String {
     format!(
-        "const BINS = {BINS}u;\nconst LOWEST = {:?};\nconst SPAN = {:?};\nconst WINDOW = {WINDOW};\nconst CELLS = {CELLS}u;\nconst BRICK = {BRICK};\nconst BRICK_SHIFT = {BRICK_SHIFT}u;\nconst BRICK_SITES = {BRICK_SITES}u;\nconst LIGHT_WORDS = {LIGHT_WORDS}u;\nconst FACTOR = {FACTOR}u;\nconst EMPTY = {EMPTY};\nconst STOPS = {STOPS};\nconst UNKNOWN = {UNKNOWN};\nconst MEDIA = {MEDIA}u;\nconst FACES = array<vec3f, {}>({});\n{}",
+        "const BINS = {BINS}u;\nconst LOWEST = {:?};\nconst SPAN = {:?};\nconst WINDOW = {WINDOW};\nconst CELLS = {CELLS}u;\nconst BRICK = {BRICK};\nconst BRICK_SHIFT = {BRICK_SHIFT}u;\nconst BRICK_SITES = {BRICK_SITES}u;\nconst LIGHT_WORDS = {LIGHT_WORDS}u;\nconst EMPTY = {EMPTY};\nconst STOPS = {STOPS};\nconst UNKNOWN = {UNKNOWN};\nconst MEDIA = {MEDIA}u;\nconst FACES = array<vec3f, {}>({});\n{}",
         eye::LOWEST,
         eye::SPAN,
         lattice::FACE_KINDS,
@@ -1481,7 +1515,8 @@ impl Marcher {
     ) {
         let look = &scene.look;
         self.ask(device);
-        let task = Task { levels: scene.levels.clone(), eye: look.camera, read: self.heard.take(), asked: scene.asked.clone() };
+        let task =
+            Task { levels: scene.levels.clone(), eye: look.camera, most: most(look), read: self.heard.take(), asked: scene.asked.clone() };
         let patch = self.keeper.swap(task, still);
         // Settled once the GPU holds what this draw's tiles and eye come to, and what rays asked for of that was read back.
         let mut current = false;
@@ -1509,8 +1544,9 @@ impl Marcher {
         queue.write_buffer(&self.buffers[0], 0, bytemuck::bytes_of(&Globals::of(look, pixels, self.adapted.marks())));
         let eye = look.camera.map(|v| v as f32);
         queue.write_buffer(&self.buffers[4], 0, bytemuck::cast_slice(&[eye[0], eye[1], eye[2], 0.0]));
-        if self.targets.as_ref().is_none_or(|t| t.pixels != pixels) {
-            self.targets = Some(self.targets(device, pixels));
+        let apart = apart(look, pixels);
+        if self.targets.as_ref().is_none_or(|t| t.pixels != pixels || t.apart != apart) {
+            self.targets = Some(self.targets(device, pixels, apart));
         }
         let targets = self.targets.as_ref().expect("targets");
         let passes = [(&targets.samples[..], &targets.groups[0]), (std::slice::from_ref(&targets.picture), &targets.groups[1])];
@@ -1588,7 +1624,7 @@ impl Marcher {
         }
     }
 
-    fn targets(&self, device: &wgpu::Device, pixels: [u32; 2]) -> Targets {
+    fn targets(&self, device: &wgpu::Device, pixels: [u32; 2], apart: f32) -> Targets {
         let target = |label, [width, height]: [u32; 2], format, usage| {
             device.create_texture(&wgpu::TextureDescriptor {
                 label: Some(label),
@@ -1602,8 +1638,8 @@ impl Marcher {
             })
         };
         let picture = target("picture", pixels, PICTURE, wgpu::TextureUsages::COPY_SRC);
-        let samples =
-            [SAMPLE_HITS, SAMPLE_COLOURS].map(|f| target("samples", pixels.map(|v| v.div_ceil(FACTOR)), f, wgpu::TextureUsages::empty()));
+        let samples = [SAMPLE_HITS, SAMPLE_COLOURS]
+            .map(|f| target("samples", pixels.map(|v| (v as f32 / apart).ceil() as u32), f, wgpu::TextureUsages::empty()));
         let views = samples.each_ref().map(|t| t.create_view(&Default::default()));
         let picture_view = picture.create_view(&Default::default());
         // Bound as numbered, the asked at 11, the told at 12.
@@ -1624,7 +1660,7 @@ impl Marcher {
         };
         let sampling = [&entries[..8], &entries[10..]].concat();
         let groups = [group(&self.layouts[0], &sampling), group(&self.layouts[1], &entries), group(&self.layouts[2], &shown)];
-        Targets { pixels, samples, picture, groups }
+        Targets { pixels, apart, samples, picture, groups }
     }
 }
 

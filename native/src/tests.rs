@@ -11,7 +11,7 @@ fn the_options_are_well_formed() {
 /** What --record writes and --replay reads, and a panic reports. */
 #[test]
 fn a_view_gives_back_the_options_it_takes() {
-    let options = "--engine flat --camera 1.5,-2,3 --look -30,10 --fov 70 --distance 500 --detail 4 --shift 2 --colour layers \
+    let options = "--engine flat --camera 1.5,-2,3 --look -30,10 --fov 70 --distance 500 --detail 4 --shift 2 --apart 6 --colour layers \
                    --size 320x200 --light 0.5,1,0,3,0.01 --eye -1,0.5 --seams --unhidden --walk";
     let argv: Vec<String> =
         ["", "--world", "moor", "--threads", "1"].into_iter().chain(options.split_whitespace()).map(str::to_string).collect();
@@ -342,7 +342,8 @@ fn specks_from(make: Make, eye: Vec3, angles: [f64; 2]) -> Vec<u8> {
     let mut world = World::new(make(1), None, 4);
     let spawn = make(1).spawn.map(|v| v as f64);
     let camera = std::array::from_fn(|i| spawn[i] + eye[i]);
-    let look = Look { fog: f64::INFINITY, ..Look::new(camera, angles, FOV, 200.0, [320.0, 200.0]) };
+    // A ray a pixel, so that level 0 is read as far as the render distance (voxels.rs's `most`).
+    let look = Look { fog: f64::INFINITY, apart: 1, ..Look::new(camera, angles, FOV, 150.0, [320.0, 200.0]) };
     let mut engine = Kind::Voxels.make(&world);
     drawn(&mut *engine, &mut world, &look)
 }
@@ -465,7 +466,13 @@ fn voxels_look_the_same_wherever_the_bricks_fall() {
 fn the_pointers_ray_meets_the_wall_behind_the_medium() {
     const PIXELS: [u32; 2] = [320, 200];
     let mut world = World::new(wall::<15>(1), None, 4);
-    let look = Look { fog: f64::INFINITY, pointer: Some([0.5; 2]), ..Look::new([0.0; 3], [45.0, 0.0], FOV, 1000.0, PIXELS.map(f64::from)) };
+    // A ray a pixel, so that level 0 is read past the wall (voxels.rs's `most`).
+    let look = Look {
+        fog: f64::INFINITY,
+        pointer: Some([0.5; 2]),
+        apart: 1,
+        ..Look::new([0.0; 3], [45.0, 0.0], FOV, 1000.0, PIXELS.map(f64::from))
+    };
     let (mut engine, mut easel) = (Kind::Voxels.make(&world), Easel::offscreen(None));
     let frame = drawn_complete(&mut *engine, &mut world, &look, &mut easel);
     // Read back a frame or two late.

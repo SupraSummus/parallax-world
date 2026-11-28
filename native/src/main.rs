@@ -82,6 +82,9 @@ struct Args {
     /** How many levels finer than a cell its voxels are (bake's lod.rs), for the engines that draw cells. */
     #[arg(long, value_name = "S", allow_hyphen_values = true, help_heading = "Engine")]
     shift: Option<i32>,
+    /** Pixels apart the voxels engine's rays are, each way: a voxel shows at least as wide. */
+    #[arg(long, value_name = "PIXELS", value_parser = clap::value_parser!(u32).range(1..=16), help_heading = "Engine")]
+    apart: Option<u32>,
     /** What chunks are painted in. */
     #[arg(long, value_enum, default_value_t = Colours::Voxels, help_heading = "Engine")]
     colour: Colours,
@@ -311,6 +314,9 @@ impl View {
         if let Some(shift) = args.shift {
             look.shift = shift;
         }
+        if let Some(apart) = args.apart {
+            look.apart = apart;
+        }
         (look.colours, look.seams, look.hides) = (args.colour, args.seams, !args.unhidden);
         look.eye = args.eye.unwrap_or_default();
         look.size = args.size.unwrap_or(SHOT);
@@ -327,9 +333,10 @@ impl View {
 
     /** What `apply` takes, as the options that say it. */
     fn options(&self) -> String {
-        let Look { camera: [x, y, z], yaw, pitch, fov, far, detail, shift, seams, colours, hides, size: [w, h], eye, .. } = self.look;
+        let Look { camera: [x, y, z], yaw, pitch, fov, far, detail, shift, apart, seams, colours, hides, size: [w, h], eye, .. } =
+            self.look;
         let mut options = format!(
-            "--engine {} --camera {x},{y},{z} --look {yaw},{pitch} --fov {fov} --distance {far} --detail {detail} --shift {shift} --colour {} --size {w}x{h}",
+            "--engine {} --camera {x},{y},{z} --look {yaw},{pitch} --fov {fov} --distance {far} --detail {detail} --shift {shift} --apart {apart} --colour {} --size {w}x{h}",
             named(self.kind),
             named(colours),
         );

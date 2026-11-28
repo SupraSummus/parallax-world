@@ -1,6 +1,6 @@
 // voxels.rs: rays through the world's own voxels, rhombic dodecahedra of the
 // FCC lattice, from cell to cell across their faces, at a coarser grid the
-// farther they go. One ray for every FACTOR × FACTOR pixels (sample_fragment);
+// farther they go. One ray for every `apart` × `apart` pixels (sample_fragment);
 // then each pixel tests its own ray against the voxels its four nearest
 // samples met, and takes the nearest it enters (resolve_fragment).
 // See-through voxels (a medium: fog, water, a far canopy) add up on the way,
@@ -19,7 +19,7 @@
 // fog's distance, and what of the sky it hides; whether voxels are lit; the
 // multiple of light the eye shows (eye.rs); the sky's light (linear); right,
 // up and forward in the world; the light the eye shows white; the pixel
-// whose ray to probe (`probe`), negative if none.
+// whose ray to probe (`probe`), negative if none; pixels apart rays are.
 struct Globals {
   resolution: vec2f,
   extent: vec2f,
@@ -31,6 +31,7 @@ struct Globals {
   horizon: vec4f,
   view: mat3x3f,
   white: f32,
+  apart: f32,
   pointer: vec2f,
 }
 
@@ -601,7 +602,7 @@ struct Sample {
 
 @fragment
 fn sample_fragment(in: Screen) -> Sample {
-  let p = (floor(in.position.xy) + 0.5) * f32(FACTOR);
+  let p = (floor(in.position.xy) + 0.5) * globals.apart;
   let d = ray_at(p);
   let hit = march(d);
   let medium = vec2u(pack4x8unorm(vec4f(gathered, 1.0)), pack4x8unorm(vec4f(through, 1.0)));
@@ -665,7 +666,7 @@ fn resolve_fragment(in: Screen) -> @location(0) vec4f {
   let d = ray_at(position);
   let ray = ray_of(d);
   let last = vec2i(textureDimensions(sample_hits)) - 1;
-  let at = position / f32(FACTOR) - 0.5;
+  let at = position / globals.apart - 0.5;
   let base = vec2i(floor(at));
   let f = at - floor(at);
   let p0 = clamp(base, vec2i(0), last);
@@ -690,7 +691,7 @@ fn resolve_fragment(in: Screen) -> @location(0) vec4f {
   var best = c.best;
   if best < 0 && !c.sky_seen {
     // None covers it: its nearest sample's voxel, where its ray would enter it.
-    let near = vec2i(floor(position / f32(FACTOR))) - base;
+    let near = vec2i(floor(position / globals.apart)) - base;
     only = near.x | (near.y << 1u);
     best = only;
   }

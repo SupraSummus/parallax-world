@@ -2,6 +2,9 @@ use std::collections::HashMap;
 
 use super::*;
 
+/** How far around the eye rays read, in a level's sites, at most: as far as a ball of RADIUS holds (reach_of). */
+const READ: f64 = (RADIUS * BRICK) as f64;
+
 /**
  * The tiles of level 0 of the forest of seed 1 around `eye`; in every
  * 64th brick of each, its first voxel made to look unlike through each
@@ -58,7 +61,7 @@ static FOREST: std::sync::LazyLock<Arc<Level>> = std::sync::LazyLock::new(|| for
 fn sync(windows: &mut Windows, tiles: &Arc<Level>, eye: Vec3, slots: &mut HashMap<u32, Vec<u32>>) -> bool {
     let w = &mut windows.windows[0];
     w.asked = (0..TABLE).filter_map(|e| w.asked(e, w.ball)).filter(|(_, held)| *held).map(|(b, _)| b).collect();
-    let (added, changed) = windows.sync(std::slice::from_ref(tiles), eye);
+    let (added, changed) = windows.sync(std::slice::from_ref(tiles), eye, RADIUS);
     for a in added {
         slots.insert(a.slot, words(&a.tile.grid, a.first, a.part).to_vec());
     }
@@ -180,7 +183,7 @@ fn lit_a_window_places_the_bricks_rays_asked_for_once_lit() {
     let eye = EYE;
     let tiles = FOREST.clone();
     let mut windows = Windows::new(1 << 20, true);
-    let sync = |windows: &mut Windows| windows.sync(std::slice::from_ref(&tiles), eye).1.contains(&true);
+    let sync = |windows: &mut Windows| windows.sync(std::slice::from_ref(&tiles), eye, RADIUS).1.contains(&true);
     while sync(&mut windows) {}
     // No light found: the bricks with voxels unknown, rays may ask for them, the empty ones empty.
     let w = &windows.windows[0];
@@ -245,6 +248,19 @@ fn windows_short_of_slots_hold_as_large_a_ball_as_fits() {
     }
     assert_eq!(windows.radius, RADIUS);
     assert!(holds(&windows, &slots) == anew(RADIUS, &tiles, eye));
+}
+
+/** Rays leave a level where its voxels show as wide as they are apart; but they read as far as the render distance. */
+#[test]
+fn rays_read_voxels_as_wide_as_they_are_apart_and_as_far_as_the_render_distance() {
+    for apart in 1..=16 {
+        let near = Look { apart, ..Look::new([0.0; 3], [0.0; 2], 70.0, 300.0, [640.0, 400.0]) };
+        assert!(near.view().focal / reach_of(most(&near)) >= f64::from(apart), "apart {apart}");
+        for far in [3000.0, 30000.0, 60000.0] {
+            let most = most(&Look { far, ..near });
+            assert!(reach(levels(most, far) - 1, most, far) >= far, "apart {apart}, far {far}");
+        }
+    }
 }
 
 #[test]
@@ -345,7 +361,7 @@ fn the_shader_is_valid_and_lays_out_what_this_file_writes() {
     wgsl::assert_layout!(
         &module,
         "Globals",
-        Globals { resolution, extent, fog, sky_fog, lit, exposure, sky_top, horizon, view, white, pointer }
+        Globals { resolution, extent, fog, sky_fog, lit, exposure, sky_top, horizon, view, white, apart, pointer }
     );
     wgsl::assert_layout!(&module, "Level", GpuLevel { min, offset, corner, reach, low, filled, high });
     wgsl::assert_layout!(&module, "Told", Told { metered, probe });

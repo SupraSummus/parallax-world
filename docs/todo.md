@@ -597,7 +597,7 @@ Numbers are for the forest at 1280×800, as measured when written.
     of the picture (`seed=42&world=valley&camera=-36000,-336,40000&look=90,0`),
     as it did before: not looked into.
   - At the levels whose sites are a few pixels wide, the sea shows rings (the valley, from 600 m up):
-    a ray for every 4 × 4 pixels takes its medium from a lattice of see-through sites as fine.
+    a ray for every few pixels each way (`--apart`) takes its medium from a lattice of see-through sites as fine.
   - A site's pieces, where shown, hide its medium and what is behind:
     right on average, but a coarse site of a crown in mist
     is a whole voxel or mist, never the crown's grain seen through mist.
