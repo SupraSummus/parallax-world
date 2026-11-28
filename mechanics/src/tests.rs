@@ -108,12 +108,37 @@ fn a_post_over_the_edge_of_another_stands_if_they_hold_on_and_topples_off_if_not
         cells.extend(upper);
         let (mut world, mut matter) = wake(cells, &ground, 0);
         let sites = run(&mut matter, &mut world);
-        (heights(&sites).1, sites.iter().map(|s| s[0]).max().expect("sites"))
+        (heights(&sites).1, sites.iter().map(|s| s[0]).max().expect("sites"), matter.broke)
     };
     let (holding, touching) = (posts(true), posts(false));
-    assert!(holding == (19, 7), "standing, as high and as far out: {holding:?}");
-    // How far it goes off is chaotic: it lands on its edge and breaks up.
-    assert!(touching.0 < 19 && touching.1 > 7, "toppled off: as high and as far out as {touching:?}");
+    assert!(holding == (19, 7, 0), "standing, as high and as far out, whole: {holding:?}");
+    // How far it goes off is chaotic; nothing strikes it hard enough to break it.
+    assert!(touching.0 < 19 && touching.1 > 7 && touching.2 == 0, "toppled off, whole: as high and as far out as {touching:?}");
+}
+
+/**
+ * A beam spinning in the air, end over end, stays as long as it is and
+ * whole: what turns as a whole is not stretched by turning (`advance`).
+ */
+#[test]
+fn a_beam_spinning_in_the_air_keeps_its_length() {
+    let nothing = |_: [i64; 3]| false;
+    let (mut world, mut matter) = wake(block([0, 0, 0], [16, 1, 1]), &nothing, 0);
+    let middle = matter.nodes.iter().fold([0.0; 3], |m, n| add(m, scale(n.x, 1.0 / matter.nodes.len() as f64)));
+    // Two turns a second about z.
+    let spin = [0.0, 0.0, 4.0 * std::f64::consts::PI];
+    for n in &mut matter.nodes {
+        n.v = solve::cross(spin, sub(n.x, middle));
+    }
+    // Its end cells, as woken: they hop from site to site as it turns.
+    let length = |m: &Matter<()>| dot_len(sub(m.middle(15), m.middle(0)));
+    let before = length(&matter);
+    while matter.time < 1.0 {
+        matter.step(&mut world);
+    }
+    assert_eq!(matter.broke, 0, "whole");
+    let after = length(&matter);
+    assert!((after / before - 1.0).abs() < 1e-4, "as long: {before} m, then {after} m");
 }
 
 /**

@@ -40,6 +40,18 @@ The solve is conjugate gradients with V-cycles over the octree
 (`mechanics/src/solve.rs`):
 a level up, the nodes of an octree cell move as one rigid body,
 so a tree falling is found at the level it is large at.
+The levels are kept from step to step (`Kept`)
+while the nodes and contacts are those they were made for,
+none let go, and they solve about as fast as when new.
+
+The nodes then move by their new speeds,
+each piece's turn as a whole exactly, about its middle
+or about where it is held,
+and only what bends it along a line (`advance`).
+Moved along a line, all that turns would be stretched each step,
+by its turn in the step squared,
+and damping lets that go only slowly:
+a post toppling off an edge would be strained to breaking before it landed.
 
 A cell whose middle is more than 0.6 of a cell off its site
 moves to the next site, if that is free;

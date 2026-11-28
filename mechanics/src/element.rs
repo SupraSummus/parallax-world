@@ -73,8 +73,16 @@ fn column(m: &M3, k: usize) -> V3 {
     [m[0][k], m[1][k], m[2][k]]
 }
 
+/** The turn by `w`, about it by as many radians as it is long, as a unit quaternion. */
+pub fn turn(w: V3) -> [f64; 4] {
+    let angle = dot(w, w).sqrt();
+    // sin(a / 2) / a, which is 1/2 as a is nothing.
+    let s = if angle > 1e-12 { (angle / 2.0).sin() / angle } else { 0.5 };
+    [(angle / 2.0).cos(), w[0] * s, w[1] * s, w[2] * s]
+}
+
 /** A unit quaternion (w, x, y, z) as a matrix. */
-fn matrix([w, x, y, z]: [f64; 4]) -> M3 {
+pub fn matrix([w, x, y, z]: [f64; 4]) -> M3 {
     [
         [1.0 - 2.0 * (y * y + z * z), 2.0 * (x * y - w * z), 2.0 * (x * z + w * y)],
         [2.0 * (x * y + w * z), 1.0 - 2.0 * (x * x + z * z), 2.0 * (y * z - w * x)],
@@ -96,8 +104,7 @@ fn rotation(a: &M3, mut q: [f64; 4]) -> [f64; 4] {
         if w < 1e-9 {
             break;
         }
-        let (s, c) = ((w / 2.0).sin() / w, (w / 2.0).cos());
-        let d = [c, omega[0] * s, omega[1] * s, omega[2] * s];
+        let d = turn(omega);
         let p = [
             d[0] * q[0] - d[1] * q[1] - d[2] * q[2] - d[3] * q[3],
             d[0] * q[1] + d[1] * q[0] + d[2] * q[3] - d[3] * q[2],
