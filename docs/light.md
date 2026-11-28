@@ -260,7 +260,7 @@ the light coming in a site's last round worked out once,
 not again to keep: a hundredth fewer instructions.
 
 Native's light sliders light the world anew (`World::relight`),
-as slowly as at the start.
+as slowly as at the start; settled, they do not ("Settling as it changes").
 
 Lighting the valley's first view, most of the world's threads' work
 is finding the light, a sixth or so generating
@@ -340,6 +340,36 @@ Of the reference's scenes, only the cave tells eight from more, a fiftieth darke
 Light adds up, so it is the sum of the sky's, the sun's and the glow's;
 kept apart, the sliders could only mix them,
 but lighting and keeping that light would cost three times as much.
+
+## Settling as it changes
+
+Light is linear, so each site can keep its light settled
+from its neighbours' as they change (`Settling`, relax.rs, which says how):
+less light spreads as more does, nothing taken back first.
+Settled, it is what the rounds find, within a fiftieth on every scene
+(`settled_light_is_the_rounds_light`);
+after a change, what lighting anew finds (`a_change_settles_as_lit_anew`).
+Native shows it with `--settle` (the panel's "settled"), as it settles.
+
+How far a site is followed matters most.
+A fixed number of bounces, as the rounds stop at most,
+followed the moor's mist as far in every direction:
+more sites than the memory held.
+Followed as far as its light still counts, each reflection halving it as its share does,
+white walls are followed far and thin mist hardly,
+as the rounds settle late in the one and at once in the other.
+
+What a change costs, against lighting anew:
+
+- a door cut through a wall in the sun, a few hundredths;
+  closed again, the light comes back as it was;
+- the sun setting, most of it: every lit site changes;
+- a lamp carried a step at night, about as much:
+  lit by it alone, over half the ground changes by more than a twentieth,
+  as a step of s changes the light at r by about s / r.
+  So a carried lamp wants what is near found first,
+  or its direct light drawn apart each frame, as light adds up,
+  and only what it bounces settled.
 
 ## Sites, as hosts and light see them
 

@@ -223,6 +223,12 @@ The light goes to the GPU beside the bricks, two words a site (RGB9E5), in a poo
 Till a brick with voxels is lit, it is not on the GPU, as if no ray had asked for it:
 what is not lit yet shows coarser, lit, never shaded by another light.
 A tile never changes but for its bricks' light, each found once.
+Settled (`--settle`), one thread lights them instead (`native/src/settler.rs`),
+by light kept settled as it changes (light's `Settling`, [light.md](light.md)):
+a brick once each of its voxels' light was found,
+and again as that light changes,
+its tile replaced by one with the new light, which the engine places anew.
+Another light (the sliders) settles where it is: no tile is lit anew.
 
 Lit, the voxels show light as an eye adapting to it would (`native/src/eye.rs`):
 the samples meter the luminance their rays meet,

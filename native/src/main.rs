@@ -14,6 +14,7 @@ mod eye;
 mod fall;
 mod gpu;
 mod inspect;
+mod settler;
 mod threads;
 mod view;
 mod window;
@@ -65,6 +66,9 @@ struct Args {
     /** Light worked out across the world (light/): how bright the sky, the sun and what glows are (1,1,0 a clear day, 0.01,0,1 night); the steps light takes along each level before the coarser one takes over; how little of the light on a site is not followed (light's TOLERANCE). Without it, voxels are shaded by the way their faces face. */
     #[arg(long, value_name = "SKY,SUN,GLOW[,STEPS[,TOLERANCE]]", value_parser = parse_light, help_heading = "View")]
     light: Option<Light>,
+    /** That light kept settled site by site as it changes (light's relax.rs, docs/light.md), not found anew: shown as it settles. */
+    #[arg(long, requires = "light", help_heading = "View")]
+    settle: bool,
     /** How that light shows, in the voxels (eye.rs): stops of exposure added, and how far the eye adapts to what it sees, 0 not at all, 1 a dark place as bright as day. */
     #[arg(long, value_name = "EXPOSURE,ADAPTING", value_parser = parse_eye, allow_hyphen_values = true, help_heading = "View")]
     eye: Option<Eye>,
@@ -201,16 +205,18 @@ const WORLD: &str = "valley";
 /**
  * How voxels are lit, whatever draws them: shaded by the way their faces
  * face, or by light worked out across the world (light's Light), the
- * same for every engine.
+ * same for every engine; or by that light kept settled as it changes
+ * (light's Settling), which only the voxels engine shows.
  */
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum Lighting {
     Shaded,
     Computed,
+    Settled,
 }
 
 impl Lighting {
-    const ALL: [(Lighting, &str); 2] = [(Lighting::Shaded, "shaded"), (Lighting::Computed, "computed")];
+    const ALL: [(Lighting, &str); 3] = [(Lighting::Shaded, "shaded"), (Lighting::Computed, "computed"), (Lighting::Settled, "settled")];
 }
 
 /**
@@ -288,7 +294,11 @@ impl View {
         self.kind = args.engine;
         let shared = self.world.shared().expect("a world with light");
         (self.brightness, self.steps, self.tolerance) = (shared.brightness(), shared.steps(), shared.tolerance());
-        self.lighting = if args.light.is_some() { Lighting::Computed } else { Lighting::Shaded };
+        self.lighting = match (args.light.is_some(), args.settle) {
+            (false, _) => Lighting::Shaded,
+            (true, false) => Lighting::Computed,
+            (true, true) => Lighting::Settled,
+        };
         self.light_look();
         let look = &mut self.look;
         if let Some(camera) = args.camera {
@@ -307,9 +317,12 @@ impl View {
         self.walker = args.walk.then(|| Walker::at(look.camera));
     }
 
-    /** Its look lit as the lighting says, by the world's light: a shot with nothing to steer is drawn with no frame before. */
+    /** Its look lit as the lighting says, by the world's light, kept settled or not: a shot with nothing to steer is drawn with no frame before. */
     fn light_look(&mut self) {
-        self.look.light = self.world.shared().map(Shared::brightness).filter(|_| self.lighting == Lighting::Computed);
+        if self.world.settle(self.lighting == Lighting::Settled) {
+            self.engine = self.kind.make(&self.world);
+        }
+        self.look.light = self.world.shared().map(Shared::brightness).filter(|_| self.lighting != Lighting::Shaded);
     }
 
     /** What `apply` takes, as the options that say it. */
@@ -320,8 +333,11 @@ impl View {
             named(self.kind),
             named(colours),
         );
-        if self.lighting == Lighting::Computed {
+        if self.lighting != Lighting::Shaded {
             options += &format!(" --light {}", light_arg(self.world.shared().expect("a world with light")));
+            if self.lighting == Lighting::Settled {
+                options += " --settle";
+            }
             let Eye { exposure, adapting } = eye;
             options += &format!(" --eye {exposure},{adapting}");
         }
@@ -399,7 +415,7 @@ impl View {
                     ui.radio_value(&mut self.lighting, lighting, name);
                 }
             });
-            if self.lighting == Lighting::Computed {
+            if self.lighting != Lighting::Shaded {
                 self.light_sliders(ui);
                 if self.kind == Kind::Voxels {
                     self.look.eye.panel(ui);
@@ -421,7 +437,7 @@ impl View {
         ui.label(format!("camera {x:.0} {y:.0} {z:.0}  yaw {yaw:.0}  pitch {pitch:.0}"));
     }
 
-    /** Lit anew (World::relight) once a slider is let go: each step of a drag would start it over. */
+    /** Lit anew (World::relight) once a slider is let go: each step of a drag would start it over; kept settled, as it is dragged. */
     fn light_sliders(&mut self, ui: &mut egui::Ui) {
         let b = &mut self.brightness;
         let mut responses = Vec::new();
@@ -433,11 +449,14 @@ impl View {
         responses.push(ui.add(egui::Slider::new(&mut self.steps, 1..=3).text("Steps a Level")));
         // Less, the more rounds of bounces where light bounces back and forth.
         responses.push(ui.add(egui::Slider::new(&mut self.tolerance, 1e-4..=0.5).logarithmic(true).text("Tolerance")));
-        let done = responses.iter().any(|r| r.drag_stopped() || (r.changed() && !r.dragged()));
+        let settled = self.lighting == Lighting::Settled;
+        let done = responses.iter().any(|r| r.drag_stopped() || r.changed() && (!r.dragged() || settled));
         let shared = self.world.shared().expect("a world with light");
         let light = Light { brightness: self.brightness, steps: Some(self.steps), tolerance: Some(self.tolerance) };
-        if done && let Some(relit) = light.on(shared) {
-            self.world.relight(relit);
+        if done
+            && let Some(relit) = light.on(shared)
+            && self.world.relight(relit)
+        {
             self.engine = self.kind.make(&self.world);
         }
     }

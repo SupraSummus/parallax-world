@@ -88,6 +88,7 @@ ground/                      # Worlds on a ground, on worldgen's public API: up 
 └── tests/                   # Fields about a ground; plans read by fields
 light/                       # Light, a prototype (docs/light.md), on worldgen's tiles
 ├── src/lib.rs               # Light: each site's, settled round by round, shared by threads
+├── src/relax.rs             # Light kept settled site by site as the world changes (Settling)
 ├── src/reference.rs         # Its reference: rays traced through level 0
 └── data/                    # The reference's values
 worlds/                      # The worlds, on worldgen's and ground's public API only
@@ -139,6 +140,7 @@ native/src/                  # The frontend: egui on winit and wgpu; in browsers
 ├── view.rs                  # The camera's basis and focal length
 ├── eye.rs                   # How light shows: the eye adapting, its curve
 ├── inspect.rs               # The voxel under the pointer, as the voxels engine finds it
+├── settler.rs               # The light kept settled on a thread of its own (--settle), lighting bricks
 ├── cut.rs                   # Cutting: what a stroke where one looks takes out of the world
 ├── fall.rs, fall/tests.rs   # The world as one lattice, the part awake moving: mechanics on a thread
 ├── engine.rs                # What draws: Engine, Picture, Painter

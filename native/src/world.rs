@@ -23,7 +23,8 @@
 //! (voxels.rs), the bricks of tiles made that its rays asked for are lit,
 //! their voxels' light found: only what shows,
 //! which in a world that is not flat is little of all a ball around the
-//! eye holds. Lit anew (relight), the tiles are kept, their light found again.
+//! eye holds. Lit anew (relight), the tiles are kept, their light found again;
+//! kept settled (settler.rs), a tile is replaced as its bricks' light changes.
 
 #[cfg(test)]
 use std::collections::HashMap;
@@ -39,6 +40,7 @@ use worldgen::grid::{Box3, Held};
 use worldgen::tiles::{made_with, make_tiles};
 
 use crate::engine::voxels;
+use crate::settler;
 use crate::threads::Post;
 use crate::view::Vec3;
 
@@ -74,8 +76,8 @@ pub struct Tile {
     /** By place in the grid's bricks, a bit each: whether all its sites are whole voxels; whether any is a medium's. */
     whole: Arc<[u64]>,
     media: Arc<[u64]>,
-    /** By where a brick's sites are in the grid's cells (in bricks), voxels::light of it, once found. */
-    lights: Box<[OnceLock<Box<[u32]>>]>,
+    /** By where a brick's sites are in the grid's cells (in bricks), voxels::light of it, once found (`relit`, in a tile of its own). */
+    lights: Box<[OnceLock<Arc<[u32]>>]>,
 }
 
 /**
@@ -110,12 +112,23 @@ impl Tile {
     /** Finds the light of its brick whose sites start at `corner`, of `level`, by `light`, if it has voxels and not found yet. */
     pub fn lit(&self, level: u32, corner: [i32; 3], light: &mut Light) {
         let Ok(first) = usize::try_from(self.grid.brick(corner[0], corner[1], corner[2])) else { return };
-        self.lights[first].get_or_init(|| voxels::light(&self.grid, level, corner, light));
+        self.lights[first]
+            .get_or_init(|| voxels::light(&self.grid, corner, |at| light.on_seen(level, at).map(|on| (on, light.glow(level, at)))));
+    }
+
+    /** Tile `self` with the light of each of `bricks` (where its sites start in the grid's cells, in bricks) as it says, the rest's as it was. */
+    pub fn relit(&self, bricks: &[(usize, Arc<[u32]>)]) -> Tile {
+        let mut lights: Vec<Option<Arc<[u32]>>> = self.lights.iter().map(|l| l.get().cloned()).collect();
+        for (first, light) in bricks {
+            lights[*first] = Some(light.clone());
+        }
+        let lights = lights.into_iter().map(|l| l.map_or_else(OnceLock::new, OnceLock::from)).collect();
+        Tile { lights, grid: self.grid.clone(), whole: self.whole.clone(), media: self.media.clone() }
     }
 }
 
 /** No light found for any brick of `grid`. */
-fn unlit(grid: &Grid) -> Box<[OnceLock<Box<[u32]>>]> {
+fn unlit(grid: &Grid) -> Box<[OnceLock<Arc<[u32]>>]> {
     (0..grid.cells.len() / BRICK_SITES).map(|_| OnceLock::new()).collect()
 }
 
@@ -264,10 +277,37 @@ enum Order {
     Edited { epoch: u64, b: Box3 },
 }
 
-/** What the workers tell the thread that draws: pieces taken to make or light, and a piece done. */
+/** What the workers tell the thread that draws: pieces taken to make or light, and a piece done; and what the settler tells. */
 enum Done {
     Took(Vec<(usize, Piece)>),
     Made(Made),
+    Settled(settler::Told),
+}
+
+/**
+ * The light kept settled on a thread of its own (settler.rs), lighting
+ * the bricks asked for in place of the workers: the orders it was given,
+ * how many it said it read, once it had nothing left to do, and the
+ * bricks it is to light, not lit yet.
+ */
+struct Settler {
+    orders: Post<settler::Order>,
+    sent: usize,
+    read: usize,
+    pending: FastSet<(usize, [i32; 3])>,
+}
+
+impl Settler {
+    fn spawn(world: Arc<worldgen::World>, shared: Shared, send: Sender<Done>) -> Settler {
+        let orders =
+            Post::spawn(|orders| vec![move || settler::run(world, shared, orders, move |told| _ = send.send(Done::Settled(told)))]);
+        Settler { orders, sent: 0, read: 0, pending: FastSet::default() }
+    }
+
+    fn send(&mut self, order: settler::Order) {
+        self.sent += 1;
+        self.orders.send(order);
+    }
 }
 
 /**
@@ -341,6 +381,10 @@ pub struct World {
     shared: Option<Shared>,
     orders: Post<Order>,
     done: Receiver<Done>,
+    /** What the workers tell it by, for a settler to tell it by too. */
+    send: Sender<Done>,
+    /** Lit, the light kept settled (`settle`), lighting the bricks asked for in place of the workers. */
+    settler: Option<Settler>,
     /** Received by wait(), not taken yet. */
     early: Vec<Done>,
     /** What it last wanted, but what was taken since; and what was taken, not done yet: as its threads told. */
@@ -538,6 +582,8 @@ impl World {
             shared,
             orders,
             done,
+            send,
+            settler: None,
             early: Vec::new(),
             wanted: FastSet::default(),
             in_flight: FastSet::default(),
@@ -576,11 +622,35 @@ impl World {
      * Lights the world anew by `shared`, its own light under another
      * brightness or steps (Shared::under, Shared::stepping): the tiles made
      * are kept, their light to find again, and what is being lit lights
-     * tiles let go. Engines that read its light (Lit) are to be made again.
+     * tiles let go; engines that read its light (Lit) are to be made again,
+     * as it returns. Kept settled (`settle`), the light settles anew where
+     * it is, shown as it does: nothing is to be made again.
      */
-    pub fn relight(&mut self, shared: Shared) {
+    pub fn relight(&mut self, shared: Shared) -> bool {
         self.shared = Some(shared.clone());
-        self.orders.send(Order::Relight(shared));
+        self.orders.send(Order::Relight(shared.clone()));
+        if let Some(settler) = &mut self.settler {
+            settler.send(settler::Order::Light(shared));
+            return false;
+        }
+        self.unlight();
+        true
+    }
+
+    /**
+     * Keeps its light settled as it changes (settler.rs), or finds it anew
+     * each time, as Light does: the tiles' light found again either way.
+     * Returns whether that changed, and engines are to be made again.
+     */
+    pub fn settle(&mut self, settled: bool) -> bool {
+        let Some(shared) = self.shared.clone().filter(|_| settled != self.settler.is_some()) else { return false };
+        self.settler = settled.then(|| Settler::spawn(self.world.clone(), shared, self.send.clone()));
+        self.unlight();
+        true
+    }
+
+    /** Its tiles kept, their light to find again. */
+    fn unlight(&mut self) {
         for level in &mut self.levels {
             *level = Arc::new(Level::new(level.tiles.iter().map(|(id, tile)| (id, Arc::new(tile.unlit())))));
         }
@@ -611,6 +681,9 @@ impl World {
             }
         }
         self.orders.send(Order::Edited { epoch, b });
+        if let Some(settler) = &mut self.settler {
+            settler.send(settler::Order::Edited(b));
+        }
         true
     }
 
@@ -624,9 +697,10 @@ impl World {
         !self.stale.is_empty()
     }
 
-    /** Tiles being made and bricks lit, or waiting to be. */
+    /** Tiles being made and bricks lit, or waiting to be; and a settler's, while it has work. */
     pub fn making(&self) -> usize {
-        self.wanted.len() + self.in_flight.len()
+        let settling = self.settler.as_ref().map_or(0, |s| s.pending.len() + usize::from(s.read < s.sent));
+        self.wanted.len() + self.in_flight.len() + settling
     }
 
     /** Whether it lacks a tile `wants` asks for, or shows one as it was before an edit. */
@@ -689,7 +763,8 @@ impl World {
         let keep = |level: usize| reach[level].unwrap_or(0.0) + KEPT;
         let mut changed = false;
         let mut made = Vec::new();
-        for done in std::mem::take(&mut self.early).into_iter().chain(self.done.try_iter()) {
+        let dones: Vec<Done> = std::mem::take(&mut self.early).into_iter().chain(self.done.try_iter()).collect();
+        for done in dones {
             match done {
                 Done::Took(took) => {
                     for piece in took {
@@ -701,6 +776,7 @@ impl World {
                     self.in_flight.remove(&(piece.0, piece.1));
                     made.push(piece);
                 }
+                Done::Settled(told) => changed |= self.settled(told),
             }
         }
         let far = |level: usize, id: TileId| far(level, camera, keep(level), id);
@@ -745,13 +821,22 @@ impl World {
             }
         }
         let unlit = |tile: &Tile, [x, y, z]: [i32; 3]| usize::try_from(tile.grid.brick(x, y, z)).is_ok_and(|f| tile.light(f).is_none());
+        let mut settle = Vec::new();
         for &(level, piece) in asked.iter() {
             let tiles = &self.levels[level].tiles;
             let job = match piece {
                 Piece::Tile(id) => (distance(level, camera, id) <= keep(level) && tiles.get(id).is_none()).then_some(None),
                 Piece::Brick(corner) => {
                     let tile = tiles.get(corner.map(|v| v.div_euclid(TILE as i32)));
-                    tile.filter(|t| lit == Lit::Bricks && unlit(t, corner)).map(|t| Some(t.clone()))
+                    let tile = tile.filter(|t| lit == Lit::Bricks && unlit(t, corner));
+                    // Kept settled, a brick is lit by the settler, once.
+                    if let (Some(settler), Some(tile)) = (&mut self.settler, tile) {
+                        if settler.pending.insert((level, corner)) {
+                            settle.push((level, corner, tile.grid.clone()));
+                        }
+                        continue;
+                    }
+                    tile.map(|t| Some(t.clone()))
                 }
             };
             if let Some(of) = job
@@ -761,10 +846,36 @@ impl World {
                 list.push_back((level, piece, of));
             }
         }
+        if let Some(settler) = &mut self.settler
+            && !settle.is_empty()
+        {
+            settler.send(settler::Order::Bricks(settle));
+        }
         // One taken and done since what was done was read above may be asked for and made again: the second is dropped.
         self.wanted = listed;
         self.orders.send(Order::Want { wanted: list, lit: lit != Lit::Not, gone, level, camera, keep: keep(level) });
         changed
+    }
+
+    /** Takes what its settler told: bricks lit, put in their tiles if those are as it lit them. Returns whether any tile changed. */
+    fn settled(&mut self, told: settler::Told) -> bool {
+        let Some(settler) = &mut self.settler else { return false };
+        match told {
+            settler::Told::Idle(read) => {
+                settler.read = read;
+                false
+            }
+            settler::Told::Lit(settler::Lit { level, id, grid, bricks }) => {
+                for (corner, _, _) in &bricks {
+                    settler.pending.remove(&(level, *corner));
+                }
+                let Some(tile) = self.levels[level].tiles.get(id).filter(|t| Arc::ptr_eq(&t.grid, &grid)) else { return false };
+                let bricks: Vec<_> = bricks.into_iter().map(|(_, first, light)| (first, light)).collect();
+                let tile = Arc::new(tile.relit(&bricks));
+                Arc::make_mut(&mut self.levels[level]).insert(id, tile);
+                true
+            }
+        }
     }
 }
 
@@ -927,6 +1038,35 @@ mod tests {
         let after = lit(&mut world);
         assert!(after != before, "the light changed");
         assert!(after == lit(&mut World::new(make(), Some(Shared::new(dusk).stepping(3)), 4)));
+    }
+
+    /** How far the light of `a`'s bricks (`lit`) is from `b`'s, at most, of the larger: RGB9E5 read back. */
+    fn off(a: &[(TileId, Vec<Option<Vec<u32>>>)], b: &[(TileId, Vec<Option<Vec<u32>>>)]) -> f32 {
+        let read = |w: u32| -> [f32; 3] { std::array::from_fn(|c| (w >> (9 * c) & 511) as f32 * ((w >> 27) as f32 - 24.0).exp2()) };
+        let words = |l: &[(TileId, Vec<Option<Vec<u32>>>)]| -> Vec<u32> {
+            l.iter().flat_map(|(_, b)| b.iter().flatten().flatten().copied()).collect()
+        };
+        let (a, b) = (words(a), words(b));
+        assert_eq!(a.len(), b.len(), "as many sites lit");
+        let off = |(x, y): ([f32; 3], [f32; 3])| (0..3).map(|c| (x[c] - y[c]).abs() / (x[c].max(y[c]) + 1e-3)).fold(0.0, f32::max);
+        a.into_iter().zip(b).map(|(x, y)| off((read(x), read(y)))).fold(0.0, f32::max)
+    }
+
+    #[test]
+    fn a_world_kept_settled_settles_under_another_light_as_one_settled_so() {
+        use light::Brightness;
+        let (day, dusk) = (Brightness { sky: 1.0, sun: 1.0, glow: 0.0 }, Brightness { sky: 0.3, sun: 0.1, glow: 1.0 });
+        let settled = |brightness| {
+            let mut world = World::new(ground(), Some(Shared::new(brightness)), 2);
+            assert!(world.settle(true));
+            world
+        };
+        let mut world = settled(day);
+        let before = lit(&mut world);
+        assert!(!world.relight(Shared::new(dusk)), "its light settles where it is, no tile lit anew");
+        let after = lit(&mut world);
+        assert!(off(&before, &after) > 0.5, "the light changed");
+        assert!(off(&after, &lit(&mut settled(dusk))) < 0.05, "as one settled under it");
     }
 
     #[test]
