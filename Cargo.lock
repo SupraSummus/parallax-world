@@ -1833,7 +1833,7 @@ dependencies = [
  "lattice",
  "libc",
  "light",
- "mechanics",
+ "local",
  "naga",
  "pollster",
  "wasm-bindgen",
