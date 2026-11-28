@@ -48,6 +48,8 @@ pub const HEIGHTS: (i64, i64) = (m(-90.0), m(1000.0));
 
 /** Where the foothills start off the valley's course, at the nearest and the furthest. */
 const FOOT: (Fx, Fx) = (Fx::m(140.0), Fx::m(320.0));
+/** How far the first crest stands from the foothills, at the least. */
+const RUN: Fx = Fx::m(380.0);
 /** The crests' height where the massifs are lowest, and where highest. */
 const CRESTS: (Units, Units) = (Units::m(230.0), Units::m(900.0));
 /** The highest the ranges raise the ground. */
@@ -138,22 +140,9 @@ impl Ranges {
     /** How much the ranges raise column (x, z), `across` from the valley's course (west less than 0); with its fraction. */
     pub fn height(&self, x: i64, z: i64, across: Fx) -> Fx {
         // Each side's ranges are its own: their noise read far apart.
-        let side = if across < Fx::ZERO { 0 } else { SIDE };
-        let foot = FOOT.0 + self.feet.at(z, side) * (FOOT.1 - FOOT.0);
-        if across.abs() <= foot {
-            return Fx::ZERO;
-        }
-        let out = across.abs() - foot;
-        // Along the valley the massifs rise and fall; the crests of the high ones stand further back.
-        // Where one side is low the other tends to tower, so the valley is rarely low on both.
-        let massif = |at: i64| {
-            let own = self.massifs.at(side + at, z);
-            let other = self.massifs.at(SIDE - side + at, z);
-            let massif = smoothstep(fx(0.36), fx(0.62), own * 3 / 4 + (Fx::ONE - other) / 4);
-            CRESTS.0 * Fx::ONE + (CRESTS.1 - CRESTS.0) * massif
-        };
+        let Some((side, out, run)) = self.out(z, across) else { return Fx::ZERO };
+        let massif = |at: i64| self.massif(side, at, z);
         let high = massif(0);
-        let run = Fx::m(380.0) + high * fx(0.75) + self.reach.at(side, z) * Units::m(400.0);
         // Peaks along the crest where its noise crosses the middle, passes between.
         let lean = out.round_units().0 / 4;
         let peak = ridge(self.peaks.at(side + lean, z));
@@ -187,13 +176,58 @@ impl Ranges {
         h = h + (crag * crag * fx(1.5) - Fx::HALF) * h * (fx(0.08) + inland * fx(0.1));
         let h = h.max(Fx::ZERO).min(TOP);
         // Past the high country, the land beyond: down to the sea west, an upland east.
-        let past = out - run - (BELT.0.to_fx() + self.belt.at(side, z) * (BELT.1 - BELT.0));
+        let past = self.past(side, z, out, run);
         if past <= Fx::ZERO {
             return h;
         }
         let beyond = if side == 0 { (LOWLAND - past / SHELF).max(DEEP) } else { UPLAND + ridge(self.behind.at(tx, tz)) * UPLAND_RIDGES };
         h + (beyond - h) * smoothstep(Fx::ZERO, LEAVE.to_fx(), past)
     }
+
+    /**
+     * The side `across` from the course is on (its noise's offset), how far
+     * it is out from the foothills, and how far from them the first crest
+     * stands: none in the valley's floor.
+     */
+    fn out(&self, z: i64, across: Fx) -> Option<(i64, Fx, Fx)> {
+        let side = if across < Fx::ZERO { 0 } else { SIDE };
+        let foot = FOOT.0 + self.feet.at(z, side) * (FOOT.1 - FOOT.0);
+        if across.abs() <= foot {
+            return None;
+        }
+        let run = RUN + self.massif(side, 0, z) * fx(0.75) + self.reach.at(side, z) * Units::m(400.0);
+        Some((side, across.abs() - foot, run))
+    }
+
+    /**
+     * How high the massif of a `side` is along the valley, `at` behind the
+     * foothills: the crests of the high ones stand further back. Where one
+     * side is low the other tends to tower, so the valley is rarely low on both.
+     */
+    fn massif(&self, side: i64, at: i64, z: i64) -> Fx {
+        let own = self.massifs.at(side + at, z);
+        let other = self.massifs.at(SIDE - side + at, z);
+        let massif = smoothstep(fx(0.36), fx(0.62), own * 3 / 4 + (Fx::ONE - other) / 4);
+        CRESTS.0 * Fx::ONE + (CRESTS.1 - CRESTS.0) * massif
+    }
+
+    /** How far past the high country a column of `side` is, `out` from the foothills under a crest `run` from them: under 0 short of it. */
+    fn past(&self, side: i64, z: i64, out: Fx, run: Fx) -> Fx {
+        out - run - (BELT.0.to_fx() + self.belt.at(side, z) * (BELT.1 - BELT.0))
+    }
+
+    /**
+     * How much column z, `across` from the course, is on the land beyond the
+     * ranges, the sea's lowland west or the upland east: none in the ranges,
+     * all where they have left it (LEAVE past the high country).
+     */
+    pub fn beyond(&self, z: i64, across: Fx) -> Fx {
+        let Some((side, out, run)) = self.out(z, across) else { return Fx::ZERO };
+        smoothstep(Fx::ZERO, LEAVE.to_fx(), self.past(side, z, out, run))
+    }
+
+    /** The least `across` from the course any land beyond the ranges is: the nearest foothills, the shortest run to a crest, the narrowest belt. */
+    pub const NEAREST_BEYOND: Fx = Fx::from_bits(FOOT.0.to_bits() + RUN.to_bits() + BELT.0.to_fx().to_bits());
 
     /** Where trees end, by column, lattice units. */
     pub fn treeline(&self, x: i64, z: i64) -> Fx {

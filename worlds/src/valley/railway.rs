@@ -38,6 +38,7 @@ use worldgen::noise::{Fx, Rng, Scope, fx, hash, hash64, smoothstep};
 use worldgen::scalar::Scalar;
 use worldgen::sites;
 use worldgen::units::{Units, m};
+use worldgen::world::Find;
 
 use super::Terrain;
 use super::course::COURSE_SLOPE;
@@ -602,6 +603,16 @@ impl Railway {
     /** Whether the ground it shapes reaches within `margin` of column (x, z): what keeps off it asks. */
     pub fn reaches(&self, x: i64, z: i64, margin: i64) -> bool {
         self.line.near(x, z, margin).is_some()
+    }
+
+    /** The places it names: its first station, bridge and tunnel. */
+    pub fn places(self: &Arc<Self>) -> Vec<(&'static str, Find)> {
+        let (station, bridge, tunnel) = (self.clone(), self.clone(), self.clone());
+        vec![
+            ("station", Box::new(move || station.first_station())),
+            ("bridge", Box::new(move || bridge.first(Structure::Bridge))),
+            ("tunnel", Box::new(move || tunnel.first(Structure::Tunnel))),
+        ]
     }
 
     /** The station of the town nearest the start of those with one: the track by it. */

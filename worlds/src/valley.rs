@@ -1,13 +1,17 @@
 //! The valley, the flagship world: the forest, with towns along its path,
 //! farmland around them, landmarks scattered through it, moorland on its
 //! uplands and along stretches of it, and a railway up one side, between
-//! mountain ranges; past them the sea to the west, an upland to the east.
+//! mountain ranges, caves in their faces; past them the sea to the west,
+//! lighthouses and wrecks on its shore, an upland to the east, badlands in it.
 //! Parts that never call each other, on one land (ground's land.rs): each
 //! reads only plans coarser than its own, bids for every column, and draws
 //! by its share; the mountains raise the ground they all stand on. New
 //! structures join it as landmarks (landmarks.rs), as parts, or as things
 //! of one. See "Composing" in docs/generators.md.
 
+pub mod badlands;
+pub mod caves;
+pub mod coast;
 pub mod course;
 pub mod fields;
 pub mod landmarks;
@@ -28,12 +32,15 @@ use worldgen::world::{Find, World};
 
 use crate::forest::{self, Forest, GROUND_SCALE, Relief};
 use crate::path::{Path, Spine};
+use badlands::Badlands;
+use caves::Caves;
+use coast::Coast;
 use course::Route;
 use fields::Fields;
 use landmarks::{Landmark, Landmarks};
 use moor::{Moor, Moorland, Uplands};
 use mountains::Ranges;
-use railway::{Railway, Structure};
+use railway::Railway;
 use town::Towns;
 
 /**
@@ -101,7 +108,8 @@ pub const VALLEY: Entry = Entry { name: "valley", make: valley, levels: 4, accur
  * The valley of `seed`, its parts in bands: the relief and the ranges,
  * then the towns, which level it; then the railway, the landmarks and
  * the moor, which shape what the towns left; then those that only draw
- * on it, the forest and the fields. The camera starts on the path, 33 m
+ * on it, the forest, the fields, the badlands, the coast and the caves,
+ * which dig it. The camera starts on the path, 33 m
  * short of the chapel nearest the start.
  */
 pub fn valley(seed: u64) -> World {
@@ -112,10 +120,21 @@ pub fn valley(seed: u64) -> World {
     let landmarks = Arc::new(Landmarks::new(&world.of("landmarks"), terrain.clone(), railway.clone()));
     let uplands = Arc::new(Uplands::new(&world.of("uplands"), terrain.clone(), landmarks.clone(), railway.clone()));
     let moorland = Arc::new(uplands.moorland(&world.of("moor")));
-    let points = points(&terrain, &landmarks, &moorland, &railway);
+    let caves = Arc::new(Caves::new(&world.of("caves"), terrain.clone(), railway.clone()));
+    let badlands = Arc::new(Badlands::new(&world.of("badlands"), terrain.clone()));
+    let coast = Arc::new(Coast::new(&world.of("coast"), terrain.clone()));
     let path = Arc::new(Path::new(terrain.path.clone()));
-    let moor = Arc::new(Moor::on(uplands, moorland, path.clone()));
+    let moor = Arc::new(Moor::on(uplands, moorland.clone(), path.clone()));
     let ground = terrain.lie.shaped(vec![railway.clone(), landmarks.clone(), moor.clone()]).ground(GROUND_SCALE, SLOPE);
+    let places = [
+        points(&terrain, &moorland),
+        landmarks.places(),
+        railway.places(),
+        caves.places(),
+        badlands.places(&ground),
+        coast.places(&ground),
+    ];
+    let points = places.into_iter().flatten().collect();
     let slope = {
         let ground = ground.clone();
         let step = 16;
@@ -126,11 +145,16 @@ pub fn valley(seed: u64) -> World {
     };
     // On the path 33 m short of the chapel nearest the start, looking along z.
     let spawn = forest::on_path(&ground, &path, landmarks.first(Landmark::Chapel).centre[1] - m(33.0), m(3.0));
-    let forest = Forest::new(world.of("forest"), path.clone()).thinned(mountains::wooded(ranges.clone(), ground.clone()));
+    let wooded = mountains::wooded(ranges.clone(), ground.clone()).times(&caves.clearing()).times(&coast.clearing());
+    let forest = Forest::new(world.of("forest"), path.clone()).thinned(wooded);
     let fields = Fields::new(world.of("fields"), path);
     let fields_bid = fields::round_towns(&world.of("fields"), towns.clone(), slope);
-    let [on_forest, on_towns, on_fields, on_landmarks, on_moor, on_railway] =
-        shares("land", town::BID_SCALE, LEAD, [Forest::bid(), towns.bid(), fields_bid, landmarks.bid(), moor.bid(), railway.bid()]);
+    let [on_forest, on_towns, on_fields, on_landmarks, on_moor, on_railway, on_badlands] = shares(
+        "land",
+        town::BID_SCALE,
+        LEAD,
+        [Forest::bid(), towns.bid(), fields_bid, landmarks.bid(), moor.bid(), railway.bid(), badlands.bid()],
+    );
     // The moor's share as with the forest alone, which its heath and mist keep to over the landmarks and the railway.
     let [_, moor_alone] = shares("moor alone", town::BID_SCALE, LEAD, [Forest::bid(), moor.bid()]);
     let layers = [
@@ -141,6 +165,9 @@ pub fn valley(seed: u64) -> World {
         moor.layers(&ground, on_moor, moor_alone),
         ranges.layers(&ground),
         railway.layers(&ground, on_railway),
+        caves.layers(),
+        badlands.layers(&ground, on_badlands),
+        coast.layers(&ground),
     ]
     .into_iter()
     .flatten()
@@ -156,27 +183,28 @@ pub fn valley(seed: u64) -> World {
 
 /** The valley's kinds, each part's after those of the parts it draws from; the moor alone has them too. */
 pub fn kinds() -> Vec<KindDef> {
-    [forest::KINDS, town::KINDS, fields::KINDS, mountains::KINDS, landmarks::KINDS, moor::KINDS, railway::KINDS].concat()
+    [
+        forest::KINDS,
+        town::KINDS,
+        fields::KINDS,
+        mountains::KINDS,
+        landmarks::KINDS,
+        moor::KINDS,
+        railway::KINDS,
+        caves::KINDS,
+        badlands::KINDS,
+        coast::KINDS,
+    ]
+    .concat()
 }
 
 /**
- * Where its features are, at any seed: the first town, chapel and
- * windmill, a mountainside, the coast, a steading on the moor; the
- * railway's first station, bridge and tunnel.
+ * Where its features are, at any seed: the first town, a mountainside,
+ * the coast, a steading and a pool on the moor. Its parts name their own
+ * (`places`): landmarks, the railway's structures, a cave, the badlands,
+ * a lighthouse and a wreck.
  */
-fn points(
-    terrain: &Arc<Terrain>,
-    landmarks: &Arc<Landmarks>,
-    moorland: &Arc<Moorland>,
-    railway: &Arc<Railway>,
-) -> Vec<(&'static str, Find)> {
-    let site = |landmark| -> Find {
-        let landmarks = landmarks.clone();
-        Box::new(move || {
-            let s = landmarks.first(landmark);
-            [s.centre[0], s.level, s.centre[1]]
-        })
-    };
+fn points(terrain: &Arc<Terrain>, moorland: &Arc<Moorland>) -> Vec<(&'static str, Find)> {
     let (towns, moorland) = (terrain.towns.clone(), moorland.clone());
     let (range, floor, start) = (terrain.clone(), terrain.clone(), terrain.clone());
     let pools = moorland.clone();
@@ -188,10 +216,6 @@ fn points(
                 [t.x, t.level, t.z]
             }),
         ),
-        ("chapel", site(Landmark::Chapel)),
-        ("windmill", site(Landmark::Windmill)),
-        // Ponds are narrower than the survey's sites: named, their water is found at any seed.
-        ("pond", site(Landmark::Pond)),
         ("mountainside", Box::new(move || mountainside(&range))),
         ("coast", {
             let terrain = terrain.clone();
@@ -200,18 +224,6 @@ fn points(
         ("steading", Box::new(move || steading(&floor, &moorland))),
         // The moor's pools too, rare on the valley's uplands.
         ("pool", Box::new(move || pools.pool_nearest(start.path.x(0).round_units().0, 0).expect("a pool within 16 km of the start"))),
-        ("station", {
-            let railway = railway.clone();
-            Box::new(move || railway.first_station())
-        }),
-        ("bridge", {
-            let railway = railway.clone();
-            Box::new(move || railway.first(Structure::Bridge))
-        }),
-        ("tunnel", {
-            let railway = railway.clone();
-            Box::new(move || railway.first(Structure::Tunnel))
-        }),
     ]
 }
 

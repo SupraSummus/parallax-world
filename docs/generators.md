@@ -11,7 +11,8 @@ which use only the engine's public API.
 The forest (`worlds/src/forest.rs`) is written this way,
 and so is the valley (`valley.rs`),
 the forest with towns, fields, landmarks, moorland and a railway
-between mountains, six parts composed as in "Composing",
+between mountains, caves in them, badlands and a coast past them,
+parts composed as in "Composing",
 the city (`city.rs`), boxes on a plan of quarter metres,
 and the cheese (`worlds/cheese/`), endless every way, no way up but for walking it,
 its holed cheese and a mine two parts sharing space ("Composing");
@@ -495,7 +496,8 @@ and fields from position alone.
 
 A world as large as the valley is **parts**
 (the forest, `town.rs`, `fields.rs`, `landmarks.rs`, `moor.rs`, `railway.rs`,
-the mountains): blocks of plans and layers that never call each other.
+the mountains, `caves.rs`, `badlands.rs`, `coast.rs`):
+blocks of plans and layers that never call each other.
 So is the cheese, in space: its holed cheese and its mine.
 They meet only through plans coarser than their own,
 through the land they bid for, the ground they pull,
@@ -510,7 +512,9 @@ The world wires them up: their bids into a land, its shares to their layers.
 So one part serves several worlds:
 the forest grows alone, in the valley and in the learned town.
 Each part draws its seeds from its name (`Scope`: `forest:conifer`),
-so no two share one by chance, whatever is added.
+so no two share one by chance, whatever is added,
+and names the places it has (`places`: the valley's landmarks, railway, caves),
+which the world gathers for hosts and checks.
 
 ### Bands
 
@@ -733,7 +737,7 @@ pieces, as crystals are, not a medium, which would stop the channels unlike.
 ### Landmarks
 
 Structures that stand alone (`worlds/src/valley/landmarks.rs`),
-a ruined keep, a watchtower, chapels, ponds, farmsteads and windmills,
+a ruined keep, a watchtower, chapels, ponds, farmsteads, windmills and hedge mazes,
 are the valley's fourth part:
 a new structure joins it as a landmark, or as a thing of a part.
 Sites are claimed ("Claims"):
@@ -819,6 +823,18 @@ as without the railway (`moor::Alone`).
 Seen from above, the line keeps to its band,
 so it turns away columns further across before reading any plan,
 and rectangles of them: it bids and draws only within its reach.
+
+### Caves, badlands, coast
+
+The caves (`worlds/src/valley/caves.rs`) dig the ground with a field of shapes,
+after all that stands on it, so nothing over a cave reaches in;
+what is in a chamber fills only what the carve left empty.
+The forest keeps off their mouths, and off the coast's lighthouses and wrecks,
+by being thinned (`ground::land::clear_of`), not by a bid:
+a bid would cut the moor's heath away too,
+and leave the part to paint its own ground.
+The badlands' strata are one function of height (`stratum` in `badlands.rs`),
+so a rock's band lies level with the slope's beside it.
 
 ### Learned parts
 

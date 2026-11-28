@@ -258,6 +258,7 @@ So a new world is a crate of its own in `worlds/`, as the cheese is,
 and for hosts, its `WORLDS` one more in `worlds::all` (`worlds/src/lib.rs`).
 To see a world without the renderer,
 `worlds/examples/map.rs` draws its layout from above, any level, any area,
+`worlds/examples/places.rs` lists where the places it names are at a seed,
 and `worlds/examples/look.rs` takes a picture of it at one level
 (`worldgen::picture`: rays through its voxels, from any eye or straight down,
 each voxel as hosts are handed it),

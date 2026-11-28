@@ -13,22 +13,25 @@ use crate::grid::Box3;
 use crate::noise::{Fixed, Fx, smoothstep};
 use crate::scalar::Scalar;
 
-/** The most bids a land is shared by. */
-pub const BIDS: usize = 6;
-
 /** The best of no other bids: far behind any. */
 const NONE: Fx = Fx::from_bits(Fixed::MIN / 2);
 
 /**
- * The shares of a point, fractions adding up to one. Small, as a land on
- * a ground keeps one per column: a share is its `Fx`'s bits, which fit in
- * 32 for a fraction.
+ * The shares of a point by N bids, fractions adding up to one. Small, as
+ * a land on a ground keeps one per column: a share is its `Fx`'s bits,
+ * which fit in 32 for a fraction.
  */
-#[derive(Clone, Copy, Default)]
-pub struct Shares([i32; BIDS]);
+#[derive(Clone, Copy)]
+pub struct Shares<const N: usize>([i32; N]);
+
+impl<const N: usize> Default for Shares<N> {
+    fn default() -> Self {
+        Shares([0; N])
+    }
+}
 
 /** How a land's shares of a point are read: decided there, or kept by what decides them less often (`kept`). */
-pub type Read = Arc<dyn Fn([i64; 3]) -> Shares + Send + Sync>;
+pub type Read<const N: usize> = Arc<dyn Fn([i64; 3]) -> Shares<N> + Send + Sync>;
 
 /** Whether a share owns what it is of, a point or (its least) a box: over a half, which one share at most is. */
 pub fn owns(share: Fx) -> bool {
@@ -45,8 +48,7 @@ pub fn shares<const N: usize>(width: Fx, bids: [Scalar; N]) -> [Scalar; N] {
 }
 
 /** The shares of `bids` as `shares` says, read as `keep` reads them, given how they are decided: kept by column on a ground. */
-pub fn kept<const N: usize>(width: Fx, bids: [Scalar; N], keep: impl FnOnce(Read) -> Read) -> [Scalar; N] {
-    const { assert!(N <= BIDS, "a land is shared by BIDS bids at most") };
+pub fn kept<const N: usize>(width: Fx, bids: [Scalar; N], keep: impl FnOnce(Read<N>) -> Read<N>) -> [Scalar; N] {
     let (bids, deciding) = (bids.to_vec(), bids.to_vec());
     let land = Arc::new(Land { width, bids, read: keep(Arc::new(move |p| decide(width, &deciding, p))) });
     std::array::from_fn(|d| {
@@ -56,10 +58,10 @@ pub fn kept<const N: usize>(width: Fx, bids: [Scalar; N], keep: impl FnOnce(Read
 }
 
 /** The bids, how wide the shares ease, and how they are read. */
-struct Land {
+struct Land<const N: usize> {
     width: Fx,
     bids: Vec<Scalar>,
-    read: Read,
+    read: Read<N>,
 }
 
 /** How much a bid `lead` ahead of the best of the rest gets, before the shares are made to add up. */
@@ -68,23 +70,18 @@ fn raw(width: Fx, lead: Fx) -> Fx {
 }
 
 /** The shares of point `p` by `bids`: each by how far it leads the best of the rest. */
-fn decide(width: Fx, bids: &[Scalar], p: [i64; 3]) -> Shares {
-    let n = bids.len();
-    let mut bid = [Fx::MIN; BIDS];
-    for (d, of) in bids.iter().enumerate() {
-        bid[d] = of.at(p);
-    }
-    let mut raws = [Fx::ZERO; BIDS];
-    for d in 0..n {
-        let rest = (0..n).filter(|e| *e != d).map(|e| bid[e]).max().unwrap_or(NONE);
-        raws[d] = raw(width, bid[d].saturating_sub(rest));
-    }
+fn decide<const N: usize>(width: Fx, bids: &[Scalar], p: [i64; 3]) -> Shares<N> {
+    let bid: [Fx; N] = std::array::from_fn(|d| bids[d].at(p));
+    let raws: [Fx; N] = std::array::from_fn(|d| {
+        let rest = (0..N).filter(|e| *e != d).map(|e| bid[e]).max().unwrap_or(NONE);
+        raw(width, bid[d].saturating_sub(rest))
+    });
     // The best bid is ahead of the rest or level with them, so the sum is at least a half.
     let sum: Fx = raws.into_iter().sum();
     Shares(raws.map(|r| (r / sum).to_bits() as i32))
 }
 
-impl Land {
+impl<const N: usize> Land<N> {
     /**
      * The least and the most bid `d`'s share is over box `b`: as low as
      * its least bid against the others' most, which would take theirs,

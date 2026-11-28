@@ -13,7 +13,7 @@ use worldgen::scalar::Scalar;
 use worldgen::units::Units;
 
 use crate::DOCS;
-use crate::plan::{Kept, Plan, SLOTS, Sloped, slot};
+use crate::plan::{Claims, Kept, Plan, SLOTS, Sloped, slot};
 
 /**
  * What pulls the ground of a band towards heights of its own (Lie::shaped):
@@ -54,6 +54,28 @@ pub fn shares<const N: usize>(name: &'static str, scale: i64, width: Fx, bids: [
         let shares = Plan::dithered(name, scale, move |x, z| decide([x, 0, z]));
         Arc::new(move |[x, _, z]| shares.at(x, z))
     })
+}
+
+/**
+ * How clear of `claims`' things a column is: none within `clear` of one,
+ * all from twice as far, eased between. What grows is thinned by it
+ * (`Scalar::times`): the valley's forest round caves' mouths and lighthouses.
+ */
+pub fn clear_of<T: Copy + Default + Send + Sync + 'static>(claims: Arc<Claims<T>>, clear: i64) -> Scalar {
+    let over = claims.clone();
+    of_columns(
+        move |x, z| match claims.near(x, z, 2 * clear) {
+            Some(([u, w], _)) => {
+                let d = Units((((u - x).pow(2) + (w - z).pow(2)) as u64).isqrt() as i64);
+                smoothstep(Units(clear).to_fx(), Units(2 * clear).to_fx(), d.to_fx())
+            }
+            None => Fx::ONE,
+        },
+        move |min, max| {
+            let near = !over.within(min.map(|v| v - 2 * clear), max.map(|v| v + 2 * clear)).is_empty();
+            (if near { Fx::ZERO } else { Fx::ONE }, Fx::ONE)
+        },
+    )
 }
 
 /**
