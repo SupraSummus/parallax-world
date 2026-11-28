@@ -765,7 +765,7 @@ Numbers are for the forest at 1280×800, as measured when written.
   simulates about four times slower than it falls,
   and over ten times once it lands, on one thread;
   the matrix products could share the cores.
-- **What a cut wakes is a rule of thumb** (`Around` in `native/src/fall.rs`):
+- **What a cut wakes is a rule of thumb** (`Around` in `native/src/mechanics.rs`):
   what is over it, near it, as much as `BUDGET` cells.
   A branch cut at its foot whose tip droops lower stays, held by its tip,
   and what is farther stays asleep, and may hold up what should fall.
@@ -798,7 +798,7 @@ Numbers are for the forest at 1280×800, as measured when written.
   its floor is loose matter metres deep, so a tree cut through falls through it
   and lands far lower, its crown's cells heavy with the leaves they carry;
   landed, its steps take several times the rounds its fall's do.
-  `native/src/fall/tests.rs` follows its fall, not its landing.
+  `native/src/mechanics/tests.rs` follows its fall, not its landing.
 - **A step's contacts settle in `CONTACT_ROUNDS` solves at most.**
   In the few steps they do not,
   a contact let go after the last solve has still held for the step, as glue,

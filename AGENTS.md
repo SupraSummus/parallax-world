@@ -14,7 +14,7 @@ Entry point for AI agents working on this codebase. Read this first.
 | [docs/generators.md](docs/generators.md) | Generating worlds in pieces: layers, things, rules | Writing or changing a world generator |
 | [docs/checks.md](docs/checks.md) | The contract worlds keep, checks of places and directions, what generating costs | A world's check or cost fails |
 | [docs/light.md](docs/light.md) | Light: what the prototype gets wrong, what was tried, what it costs | Touching `light/` or native's lighting |
-| [docs/mechanics.md](docs/mechanics.md) | Mechanics on the voxels: matter that moves, bends and breaks, at a level of detail | Touching `mechanics/` or `native/src/fall.rs` |
+| [docs/mechanics.md](docs/mechanics.md) | Mechanics on the voxels: matter that moves, bends and breaks, at a level of detail | Touching `mechanics/` or `native/src/mechanics.rs` |
 | [docs/statics.md](docs/statics.md) | Statics, an experiment: what stands and what falls, what was measured | Touching `statics/` |
 | [.claude/skills/lead/SKILL.md](.claude/skills/lead/SKILL.md) | The lead role: driving changes to main through delegated work and PRs | Only when the user asks for it (`/lead`) |
 
@@ -118,7 +118,7 @@ worlds/                      # The worlds, on worldgen's and ground's public API
 │                            # scenes/ is not in git (docs/generators.md, "Scenes")
 ├── tests/                   # Its worlds keep the contract and their cost baselines (checks.rs); scenes
 └── examples/                # map, look, places, check, cost, bench: a world looked at, checked, measured
-mechanics/src/               # Mechanics on the voxels (docs/mechanics.md), driven by native/src/fall.rs
+mechanics/src/               # Mechanics on the voxels (docs/mechanics.md), driven by native/src/mechanics.rs
 ├── lib.rs                   # Matter: cells welded across faces where both hold on, contacts; a step; hops
 ├── element.rs               # A cell as a finite element: a co-rotated cube of eight nodes
 ├── solve.rs                 # Conjugate gradients, V-cycles over the octree
@@ -143,7 +143,7 @@ native/src/                  # The frontend: egui on winit and wgpu; in browsers
 ├── inspect.rs               # The voxel under the pointer, as the voxels engine finds it
 ├── settler.rs               # The light kept settled on a thread of its own (--settle), lighting bricks
 ├── cut.rs                   # Cutting: what a stroke where one looks takes out of the world
-├── fall.rs, fall/tests.rs   # The world as one lattice, the part awake moving: mechanics on a thread
+├── mechanics.rs, mechanics/ # The world as one lattice, the part awake moving: mechanics on a thread
 ├── engine.rs                # What draws: Engine, Picture, Painter
 └── engine/
     ├── voxels.rs, voxels.wgsl # The voxels engine: rays through the tiles' voxels
