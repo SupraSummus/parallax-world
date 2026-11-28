@@ -32,7 +32,9 @@
 //! where light bounces back and forth. Of each round a site keeps the
 //! light on its faces (`round`): what the sites it reflects on read, and
 //! what is to settle. Between whole voxels that touch no light comes: one
-//! beside a face is lit as the face is (`weighed`).
+//! beside a face is lit as the face is (`weighed`). What comes along a
+//! site's lines (Line) is the world's alone, linear in the light: relax.rs
+//! keeps the same light settled site by site as the world changes.
 //!
 //! What is found at a site is a function of the world alone, so the Lights
 //! of all threads keep it together (Shared), each site's found once: no
@@ -564,6 +566,27 @@ impl Level {
 }
 
 /**
+ * What comes to a site along a direction, all but reflected light
+ * (`along`), as the world has it, whatever the light: what glows along it
+ * (at Light's glow), how much of what comes from past it gets through,
+ * and where that comes from. So it is linear in the sky's light, the
+ * glow's and the coarser level's (`comes`; relax.rs).
+ */
+struct Line {
+    glow: Rgb,
+    through: Rgb,
+    beyond: Beyond,
+}
+
+/** Where the light past a Line comes from: nothing, the sky, or the coarser level's sites, weighed, over their total (`coarser`). */
+#[derive(Clone, Copy)]
+enum Beyond {
+    Nothing,
+    Sky,
+    Coarser { sites: [([i64; 3], f32); 4], total: f32 },
+}
+
+/**
  * What comes to a site and does not change as its light settles (`along`):
  * from each direction, all but reflected light; the sites met that
  * reflect, each with its direction, how many steps along it, and the share
@@ -706,13 +729,14 @@ pub struct Light {
     sky: [Rgb; N],
     /** What the sky looks like, where a picture's rays miss. */
     background: Rgb,
+    /** The world's sites read (`hold`), by level, while kept: for relax.rs, what a site's lines read. */
+    reads: Option<Vec<(usize, [i64; 3])>>,
 }
 
 impl Light {
     /** The light of `world`, found only where asked, and kept in `shared`. */
     pub fn new(world: impl Into<Arc<World>>, shared: Shared) -> Light {
         let world = world.into();
-        let Brightness { sky, sun, .. } = shared.brightness;
         let coarsest = GRID_LEVELS as u32 - 1;
         let levels = (0..=coarsest).map(|level| Level::new(world.heights_at(level))).collect();
         let unit = DIRECTIONS.map(|d| normalize(d.map(|v| v as f64)));
@@ -722,23 +746,9 @@ impl Light {
             let total: f64 = weights.iter().sum();
             weights.map(|w| (w / total) as f32)
         });
-        let sun_at = DIRECTIONS.iter().position(|d| *d == SUN_DIRECTION).expect("the sun is in one of them");
-        let skies = std::array::from_fn(|d| {
-            let up = unit[d][1];
-            let open = if up > 1e-9 {
-                1.0
-            } else if up > -1e-9 {
-                0.5
-            } else {
-                0.0
-            };
-            std::array::from_fn(|c| open * SKY[c] * sky + if d == sun_at { SUN[c] * sun } else { 0.0 })
-        });
-        let background = SKY.map(|c| c * sky);
-        // A world with no heights has no sky: what glows is all its light.
-        let (skies, background) = if world.heights.is_some() { (skies, background) } else { ([[0.0; 3]; N], [0.0; 3]) };
+        let (skies, background) = sky(&world, &unit, shared.brightness);
         let glow = shared.brightness.glowing() / GLOW_ONE as f32;
-        Light { world, shared, levels, work: Vec::new(), unit, cosines, glow, sky: skies, background }
+        Light { world, shared, levels, work: Vec::new(), unit, cosines, glow, sky: skies, background, reads: None }
     }
 
     /** Whether a whole voxel, one that lets nothing through, is at `site` of level `i`. */
@@ -792,6 +802,9 @@ impl Light {
 
     /** The sites of level `i`'s tile that holds `site`, generated if not yet; none above or below every voxel. */
     fn hold(&mut self, i: usize, site: [i64; 3]) -> Option<([i64; 3], &VoxelGrid)> {
+        if let Some(reads) = &mut self.reads {
+            reads.push((i, site));
+        }
         let level = &mut self.levels[i];
         let heights = level.heights;
         if !(heights.0..heights.1).contains(&site[1]) {
@@ -894,30 +907,60 @@ impl Light {
     /** What the light of site `p` of level `i` is found from: what comes to it along each direction (Paths), and no rounds yet. */
     fn begin(&mut self, i: usize, p: [i64; 3]) -> Site {
         self.shared.begun(i);
-        let whole = self.whole(i, p);
-        let around = Around {
-            met: std::array::from_fn(|k| self.meets(i, add(p, FACES[k]), ENTERS[k])),
-            touching: std::array::from_fn(|k| whole && self.whole(i, add(p, FACES[k]))),
-        };
-        let (mut work, mut touches): (Work, Touches) = (self.work.pop().unwrap_or_default(), None);
-        work.clear();
-        let comes = std::array::from_fn(|d| {
-            // Across a face, a whole voxel touches the next; across an edge, light comes between them.
-            if HALVES[d].is_none() && around.touching[d] {
-                touches.get_or_insert_with(|| Box::new([[0.0; 3]; F]))[d] = around.met[d].1.1;
-                return [0; 3];
-            }
-            pack(self.along(i, p, &around, &mut work, d))
-        });
+        let mut work = self.work.pop().unwrap_or_default();
+        let (lines, touches) = self.lines(i, p, &mut work);
+        let comes = std::array::from_fn(|d| pack(self.comes(i, &mut work, &lines[d], d)));
         let paths = Paths { comes, reflects: work.reflects.as_slice().into(), touches };
         self.work.push(work);
         Site::new(paths)
     }
 
     /**
-     * The light coming to `p`, a site of level `i`, from direction `d`,
-     * all but reflected light: from the sites that way, what each glows;
-     * past them, the coarser level's light. After Shared's steps, once the
+     * What comes to site `p` of level `i` along each direction (`along`),
+     * the sites met that reflect in `work`'s, and the colours of the whole
+     * voxels it touches (Paths): all of it the world's alone, none of
+     * the light.
+     */
+    fn lines(&mut self, i: usize, p: [i64; 3], work: &mut Work) -> ([Line; N], Touches) {
+        work.clear();
+        let whole = self.whole(i, p);
+        let around = Around {
+            met: std::array::from_fn(|k| self.meets(i, add(p, FACES[k]), ENTERS[k])),
+            touching: std::array::from_fn(|k| whole && self.whole(i, add(p, FACES[k]))),
+        };
+        let mut touches: Touches = None;
+        let lines = std::array::from_fn(|d| {
+            // Across a face, a whole voxel touches the next; across an edge, light comes between them.
+            if HALVES[d].is_none() && around.touching[d] {
+                touches.get_or_insert_with(|| Box::new([[0.0; 3]; F]))[d] = around.met[d].1.1;
+                return Line { glow: [0.0; 3], through: [0.0; 3], beyond: Beyond::Nothing };
+            }
+            self.along(i, p, &around, work, d)
+        });
+        (lines, touches)
+    }
+
+    /** What comes along `line`, from direction `d` to a site of level `i`: past it, the sky's light or the coarser level's, settled. */
+    fn comes(&mut self, i: usize, work: &mut Work, line: &Line, d: usize) -> Rgb {
+        let beyond = match line.beyond {
+            Beyond::Nothing => [0.0; 3],
+            Beyond::Sky => self.sky[d],
+            Beyond::Coarser { sites, total } => {
+                let mut sum = [0.0f32; 3];
+                for (site, w) in sites.into_iter().filter(|&(_, w)| w > 0.0) {
+                    let light = unpack(work.light(self, i + 1, site, d));
+                    (0..3).for_each(|c| sum[c] += w * light[c]);
+                }
+                sum.map(|c| c / total)
+            }
+        };
+        std::array::from_fn(|c| line.glow[c] + line.through[c] * beyond[c])
+    }
+
+    /**
+     * What comes to `p`, a site of level `i`, from direction `d`, all
+     * but reflected light (Line): from the sites that way, what each
+     * glows; past them, the coarser level's light. After Shared's steps, once the
      * line is to leave the cube of the coarser site it is in, the coarser
      * level's light from `d` through the face it leaves by (`coarser`), if
      * that site has room for light: it comes from past the cube, all the
@@ -929,7 +972,7 @@ impl Light {
      * next that, with it, reflects over: that one reflects for both, as if
      * lit alike. What is still owed where the line ends is left out.
      */
-    fn along(&mut self, i: usize, p: [i64; 3], around: &Around, work: &mut Work, d: usize) -> Rgb {
+    fn along(&mut self, i: usize, p: [i64; 3], around: &Around, work: &mut Work, d: usize) -> Line {
         let (v, heights, steps) = (DIRECTIONS[d], self.levels[i].heights, self.shared.steps);
         let coarser = i + 1 < self.levels.len();
         // What has come so far, and how much of what comes from further on gets through.
@@ -944,7 +987,7 @@ impl Light {
                 let cube = coarse(q);
                 let leaves = (0..3).find(|&a| coarse(next)[a] != cube[a]);
                 if let Some(across) = leaves.filter(|_| coarser && step > steps && work.open(self, i + 1, cube) > 0.0) {
-                    break 'march self.coarser(i + 1, work, q, across, d);
+                    break 'march self.coarser(i + 1, work, q, across);
                 }
                 // The parts of the step, each with its share of the light: across an edge, a site beside it, half
                 // the light each, come in by one face, then the one past it, all of it, by two (ENTERS). Next to
@@ -965,7 +1008,7 @@ impl Light {
                     let shares = if step == 1 {
                         let open = beside.map(|k| if around.touching[k] { 0.0 } else { 1.0 });
                         if open == [0.0; 2] {
-                            break 'march [0.0; 3];
+                            break 'march Beyond::Nothing;
                         }
                         open.map(|o| o / (open[0] + open[1]))
                     } else {
@@ -986,19 +1029,19 @@ impl Light {
                 q = next;
                 // Less gets through than the tolerance, or nothing more is met: below every voxel and not going up, or above them and not going down.
                 if through.iter().all(|&t| t < self.shared.tolerance) || q[1] < heights.0 - 1 && v[1] <= 0 {
-                    break 'march [0.0; 3];
+                    break 'march Beyond::Nothing;
                 }
                 if q[1] > heights.1 && v[1] >= 0 {
-                    break 'march self.sky[d];
+                    break 'march Beyond::Sky;
                 }
             }
-            if !coarser && v[1] >= 0 { self.sky[d] } else { [0.0; 3] }
+            if !coarser && v[1] >= 0 { Beyond::Sky } else { Beyond::Nothing }
         };
-        std::array::from_fn(|c| sum[c] + through[c] * beyond[c])
+        Line { glow: sum, through, beyond }
     }
 
     /**
-     * Level `i`'s light from direction `d` through the face across axis
+     * Where level `i`'s light comes from through the face across axis
      * `across` of the cube of `q`, a site of level `i − 1`, where the line
      * through the middle of `q` crosses it: its sites' light from `d` comes
      * through their faces on that side, so it is bilinear between the face
@@ -1009,7 +1052,7 @@ impl Light {
      * site beside `q` towards it, if it is past `q`'s cube (`through`): so
      * none is read past a wall.
      */
-    fn coarser(&mut self, i: usize, work: &mut Work, q: [i64; 3], across: usize, d: usize) -> Rgb {
+    fn coarser(&mut self, i: usize, work: &mut Work, q: [i64; 3], across: usize) -> Beyond {
         let cube = coarse(q);
         let axes = [(across + 1) % 3, (across + 2) % 3];
         // Along each axis of the face, the two coarser sites nearest the line, each with its weight.
@@ -1020,7 +1063,7 @@ impl Light {
         // Along each axis, how much gets through from `q` to the side past its cube: found once, if a site
         // there lets light through.
         let mut past: [Option<f32>; 2] = [None; 2];
-        let (mut sum, mut total) = ([0.0f32; 3], 0.0f32);
+        let (mut sites, mut total, mut n) = ([([0; 3], 0.0f32); 4], 0.0f32, 0);
         for (y, wy) in sides[1] {
             for (x, wx) in sides[0] {
                 let mut site = cube;
@@ -1035,13 +1078,12 @@ impl Light {
                     open *= through;
                 }
                 if open > 0.0 {
-                    let (w, light) = (wx * wy, unpack(work.light(self, i, site, d)));
-                    total += w * open;
-                    (0..3).for_each(|ch| sum[ch] += w * open * light[ch]);
+                    let w = wx * wy * open;
+                    (sites[n], total, n) = ((site, w), total + w, n + 1);
                 }
             }
         }
-        sum.map(|ch| ch / total)
+        Beyond::Coarser { sites, total }
     }
 
     /** How much of what comes from `q`, a site of level `i`, gets through the site across its face `face`, on average over the channels. */
@@ -1089,8 +1131,12 @@ impl Light {
 
     /** What lights the voxel at `site` of `level` (on_voxel), if light gets out of it: none if a ray meets it only where levels meet. */
     pub fn on_seen(&mut self, level: u32, site: [i64; 3]) -> Option<Rgb> {
-        let i = level as usize;
-        (self.open(i, site) > 0.0 || self.surface(i, site)).then(|| self.on_voxel(level, site))
+        self.lets_out(level as usize, site).then(|| self.on_voxel(level, site))
+    }
+
+    /** Whether light gets out of the voxel at `site` of level `i`: it lets some through, or has a neighbour that does. */
+    fn lets_out(&mut self, i: usize, site: [i64; 3]) -> bool {
+        self.open(i, site) > 0.0 || self.surface(i, site)
     }
 
     /** Whether the voxel at `site` of level `i` has a neighbour light gets through. */
@@ -1117,20 +1163,24 @@ impl Light {
     /** What lights the voxel at `site` of `level` to its colour at 1: the light on its surface, which faces the neighbours hosts are shown no voxel at. */
     pub fn on_voxel(&mut self, level: u32, site: [i64; 3]) -> Rgb {
         let i = level as usize;
+        let (light, touches) = (self.light(i, site).map(unpack), self.touches(i, site));
+        self.on_surface(i, site, &light, touches.as_ref())
+    }
+
+    /** What lights the voxel at `site` of level `i` (`on_voxel`) if the light coming to it is `light`, and it touches `touches`. */
+    fn on_surface(&mut self, i: usize, site: [i64; 3], light: &[Rgb; N], touches: Option<&[Rgb; F]>) -> Rgb {
         let mut normal = [0.0; 3];
         for face in FACES {
             if !self.drawn(i, add(site, face)) {
                 (0..3).for_each(|c| normal[c] += face[c] as f64);
             }
         }
-        let (light, touches) = (self.light(i, site).map(unpack), self.touches(i, site));
-        let touches = touches.as_ref();
         if normal == [0.0; 3] {
             // No surface, or all of it: the mean of all its faces'.
-            let all = FACES.map(|f| self.on(&light, touches, normalize(f.map(|v| v as f64))));
+            let all = FACES.map(|f| self.on(light, touches, normalize(f.map(|v| v as f64))));
             return std::array::from_fn(|c| all.iter().map(|l| l[c]).sum::<f32>() / all.len() as f32);
         }
-        self.on(&light, touches, normalize(normal))
+        self.on(light, touches, normalize(normal))
     }
 
     /** `picture`, of `level`, lit: each voxel's colour times the light on it, glowing ones' own light added; the sky where it misses. */
@@ -1151,6 +1201,31 @@ impl Light {
             }
         }
     }
+}
+
+/**
+ * The sky's radiance per direction under `brightness` (the sun's within
+ * it), whose `unit` vectors these are, and what it looks like where a
+ * picture's rays miss: none in a world with no heights, where what glows
+ * is all its light.
+ */
+fn sky(world: &World, unit: &[[f64; 3]; N], Brightness { sky, sun, .. }: Brightness) -> ([Rgb; N], Rgb) {
+    if world.heights.is_none() {
+        return ([[0.0; 3]; N], [0.0; 3]);
+    }
+    let sun_at = DIRECTIONS.iter().position(|d| *d == SUN_DIRECTION).expect("the sun is in one of them");
+    let skies = std::array::from_fn(|d| {
+        let up = unit[d][1];
+        let open = if up > 1e-9 {
+            1.0
+        } else if up > -1e-9 {
+            0.5
+        } else {
+            0.0
+        };
+        std::array::from_fn(|c| open * SKY[c] * sky + if d == sun_at { SUN[c] * sun } else { 0.0 })
+    });
+    (skies, SKY.map(|c| c * sky))
 }
 
 /** How light sees a site, as VoxelGrid::light has it: how much of each channel it stops, of ALPHA, and the colour of that; what it glows. */
@@ -1228,6 +1303,8 @@ fn normalize(v: [f64; 3]) -> [f64; 3] {
     let length = dot(v, v).sqrt();
     v.map(|c| c / length)
 }
+
+pub mod relax;
 
 #[cfg(test)]
 mod reference;

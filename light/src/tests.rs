@@ -1,6 +1,7 @@
 use super::*;
 use lattice::light::colour;
 use worldgen::generator::{Field, Generator, KindDef, Layer, Node, Op, Population, SOLID, Shape, cuboid};
+use worldgen::grid::{Box3, Held};
 
 const STONE: u8 = 0;
 const LAMP_KIND: u8 = 1;
@@ -416,4 +417,104 @@ fn thin_walls_keep_the_sky_out() {
             assert!(inside < 0.02, "a shed {t} thick, {h} across, off by {o}: at {p:?}, {inside} of the open's");
         }
     }
+}
+
+/**
+ * Settled site by site (relax.rs), light is what Light's rounds find, on
+ * every scene: within a fiftieth on the probes.
+ */
+#[test]
+fn settled_light_is_the_rounds_light() {
+    for Scene { name, world, brightness, probes, .. } in scenes() {
+        let world = Arc::new(world);
+        let mut light = Light::new(world.clone(), Shared::new(brightness));
+        let mut settling = relax::Settling::new(world, Shared::new(brightness));
+        probes.iter().for_each(|&p| settling.ask(0, p));
+        while settling.settle(usize::MAX) > 0 {}
+        for &p in &probes {
+            let [rounds, settled] = [light.on_seen(0, p), settling.on_seen(0, p)].map(|l| l.expect("seen").iter().sum::<f32>());
+            assert!((settled / rounds - 1.0).abs() < 0.02, "{name}, {p:?}: settled {settled}, by rounds {rounds}");
+        }
+    }
+}
+
+/** Sites on the ground at levels 0 to 3, every fourth, 32 of a level about the middle: where `off` compares light. */
+fn grounds() -> Vec<(u32, [i64; 3])> {
+    (0..4).flat_map(|level| (-8..8).flat_map(move |x| (-8..8).map(move |z| (level, [4 * x, -1, 4 * z])))).collect()
+}
+
+/** `world` under `brightness`, settled to `tolerance`: `grounds` and all they read. */
+fn settled(world: Arc<World>, brightness: Brightness, tolerance: f32) -> relax::Settling {
+    let mut settling = relax::Settling::new(world, Shared::new(brightness).settling(tolerance));
+    for (level, site) in grounds() {
+        settling.ask(level, site);
+    }
+    settle(&mut settling);
+    settling
+}
+
+/** How many times a site's light is found till `settling` settles. */
+fn settle(settling: &mut relax::Settling) -> usize {
+    let before = settling.found();
+    while settling.settle(usize::MAX) > 0 {}
+    settling.found() - before
+}
+
+/** How far the light on the grounds is from `a`'s to `b`'s, at most, of the larger: all of it where one sees a ground the other does not. */
+fn off(a: &mut relax::Settling, b: &mut relax::Settling) -> f32 {
+    let mut most = 0.0f32;
+    for (level, site) in grounds() {
+        match (a.on_seen(level, site), b.on_seen(level, site)) {
+            (Some(la), Some(lb)) => (0..3).for_each(|c| most = most.max((la[c] - lb[c]).abs() / (la[c].max(lb[c]) + 1e-4))),
+            (None, None) => {}
+            _ => most = 1.0,
+        }
+    }
+    most
+}
+
+/**
+ * Edits `world` by `changes` (worldgen's Edits), and has `settling`
+ * follow, `grounds` asked for again, as a host asks for what shows anew:
+ * settled again, how many times a site's light was found.
+ */
+fn edit(world: &World, settling: &mut relax::Settling, changes: impl IntoIterator<Item = ([i64; 3], (Held, lattice::Holds))>) -> usize {
+    let (_, b) = world.edits.change(changes).expect("an edit");
+    settling.edited(b);
+    for (level, site) in grounds() {
+        settling.ask(level, site);
+    }
+    settle(settling)
+}
+
+/**
+ * Settled again after a change, light is as if lit anew, within a few
+ * times the tolerance: a door cut through a wall in the sun, finding a
+ * few hundredths of what lighting anew does; the door closed again, the
+ * light as before it was cut, light taken away as it was added; the sun
+ * set, every lit site found again, but less often than lit anew.
+ */
+#[test]
+fn a_change_settles_as_lit_anew() {
+    let (day, dusk) = (Brightness { sky: 1.0, sun: 1.0, glow: 0.0 }, Brightness { sky: 0.3, sun: 0.0, glow: 0.0 });
+    let wall = || Arc::new(world(&[], |x, y, z, s| y < 0 || (0..2 * s).contains(&x) && y < 32 && z.abs() < 96));
+    let door: Vec<[i64; 3]> = (0..2).flat_map(|x| (0..16).flat_map(move |y| (-8..8).map(move |z| [x, y, z]))).collect();
+    let cut = |_| (Held::default(), 0);
+    let mut before = settled(wall(), day, 1e-3);
+    let opened = wall();
+    opened.edits.change(door.iter().map(|&p| (p, cut(p))));
+    let mut opened = settled(opened, day, 1e-3);
+    let world = wall();
+    let mut settling = settled(world.clone(), day, 1e-3);
+    let found = edit(&world, &mut settling, door.iter().map(|&p| (p, cut(p))));
+    assert!(off(&mut settling, &mut opened) < 5e-3, "the door cut, off by {}", off(&mut settling, &mut opened));
+    assert!(found * 10 < opened.found(), "the door cut, found {found}, lit anew {}", opened.found());
+    let grid = worldgen::generator::generate(&world.generator, &Box3 { min: [0, 0, -8], max: [2, 16, 8] }, 0);
+    edit(&world, &mut settling, door.iter().map(|&[x, y, z]| ([x, y, z], (grid.held(x, y, z), lattice::HOLDS_ALL))));
+    assert!(off(&mut settling, &mut before) < 5e-3, "the door closed, off by {}", off(&mut settling, &mut before));
+    settling.under(dusk);
+    let found = settle(&mut settling);
+    let mut fresh = settled(wall(), dusk, 1e-3);
+    assert!(off(&mut settling, &mut fresh) < 5e-3, "at dusk, off by {}", off(&mut settling, &mut fresh));
+    assert!(found < fresh.found(), "at dusk, found {found}, lit anew {}", fresh.found());
 }

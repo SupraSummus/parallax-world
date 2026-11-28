@@ -46,6 +46,8 @@ adapting, over a second, to how bright what it looks at is,
 so that a dark room or a night shows brighter, but still dark,
 and what is bright past a door or round a lamp washes out less;
 its exposure and how far it adapts are sliders too.
+Settled, that light is kept as it changes and shown as it settles:
+it comes in bit by bit, and follows the sliders as they are dragged.
 
 **Views in the URL** – The page's query can give the world, its seed,
 the camera, where it looks, the field of view, the render distance

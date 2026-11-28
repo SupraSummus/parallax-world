@@ -13,9 +13,9 @@
 //! rest. The levels' balls share a radius, as large as the pool holds
 //! (Windows). Beside it, which cubes of bricks, octree cells above
 //! them, no voxel meets (CELLS): rays go across those at once. Tiles
-//! never change once made, only are replaced (an edit, a relight), so a
-//! brick is uploaded once, and its slot freed as it leaves its ball or
-//! its tile is replaced.
+//! never change once made, only are replaced (an edit, a relight, light
+//! settling), so a brick is uploaded once, and its slot freed as it
+//! leaves its ball or its tile is replaced.
 //!
 //! The windows are kept on a thread of their own (Keeper), which a draw
 //! hands a task and takes a patch from: what the GPU holds of them is a
@@ -51,7 +51,6 @@ use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};
 use egui_wgpu::wgpu;
 use lattice::GRID_LEVELS;
 use lattice::light::{rgb9e5, srgb_to_linear};
-use light::Light;
 
 use super::{Engine, Frame, Look, Painter, Picture};
 use crate::eye::{self, Adapted, BINS};
@@ -212,12 +211,13 @@ fn words(grid: &lattice::Grid, first: usize, part: usize) -> [u32; BRICK_SITES] 
 const LIGHT_WORDS: usize = 2;
 
 /**
- * The light on the voxels of the brick of `grid`, of `level`, whose sites
- * start at `corner`, by site in the order of its cells, LIGHT_WORDS each:
- * Light::on_seen, and its own glow, as RGB9E5; 0 where none. What a voxel
- * sends out is its colour times the one, and the other.
+ * The light on the voxels of the brick of `grid` whose sites start at
+ * `corner`, by site in the order of its cells, LIGHT_WORDS each: what
+ * `seen` says lights a voxel (Light::on_seen), and its own glow, as
+ * RGB9E5; 0 where none. What a voxel sends out is its colour times the
+ * one, and the other.
  */
-pub fn light(grid: &lattice::Grid, level: u32, corner: [i32; 3], light: &mut Light) -> Box<[u32]> {
+pub fn light(grid: &lattice::Grid, corner: [i32; 3], mut seen: impl FnMut([i64; 3]) -> Option<([f32; 3], [f32; 3])>) -> Arc<[u32]> {
     let mut out = vec![0; BRICK_SITES * LIGHT_WORDS];
     for r in 0..BRICK * BRICK * BRICK {
         let site: [i32; 3] = std::array::from_fn(|d| corner[d] + [r % BRICK, r / BRICK % BRICK, r / BRICK / BRICK][d]);
@@ -225,10 +225,9 @@ pub fn light(grid: &lattice::Grid, level: u32, corner: [i32; 3], light: &mut Lig
         if look == 0 {
             continue;
         }
-        let at = site.map(i64::from);
-        if let Some(on) = light.on_seen(level, at) {
+        if let Some((on, glow)) = seen(site.map(i64::from)) {
             let i = r as usize * LIGHT_WORDS;
-            out[i..i + LIGHT_WORDS].copy_from_slice(&[rgb9e5(on), rgb9e5(light.glow(level, at))]);
+            out[i..i + LIGHT_WORDS].copy_from_slice(&[rgb9e5(on), rgb9e5(glow)]);
         }
     }
     out.into()

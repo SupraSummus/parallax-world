@@ -193,7 +193,7 @@ fn lit_a_window_places_the_bricks_rays_asked_for_once_lit() {
     // Rays ask for half, and some of all are lit (with them the buried bricks of a tile, which share their sites):
     // those placed that were asked for and are lit, no other.
     let world = (worlds::by_name("forest").expect("forest").make)(1);
-    let mut light = Light::new(world, light::Shared::new(light::Brightness { sky: 1.0, sun: 1.0, glow: 0.0 }));
+    let mut light = light::Light::new(world, light::Shared::new(light::Brightness { sky: 1.0, sun: 1.0, glow: 0.0 }));
     for &b in unknown.iter().step_by(3) {
         let (corner, id) = w.site(b);
         tiles.tiles.get(id).expect("the tile").lit(0, corner, &mut light);
