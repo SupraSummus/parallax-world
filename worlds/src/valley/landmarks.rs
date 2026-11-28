@@ -1,7 +1,7 @@
 //! Landmarks: structures standing alone through the valley, a ruined keep
 //! on a hilltop in the forest, a watchtower on a rise, a wayside chapel by
 //! the path, a pond in a hollow, a farmstead and a windmill in the
-//! farmland. A part of the valley (valley.rs): landmarks claimed
+//! farmland, a hedge maze on the lawns of a manor that is gone. A part of the valley (valley.rs): landmarks claimed
 //! anywhere, apart, each chosen by what the valley's raw ground is like
 //! there; each shapes the ground under it, bids for its footprint and a
 //! clearing round it, so trees and crops keep off, and draws what it wins.
@@ -27,6 +27,7 @@ use worldgen::noise::{Fx, Rng, Scope, ValueNoise, fx};
 use worldgen::scalar::Scalar;
 use worldgen::sites;
 use worldgen::units::{Units, m};
+use worldgen::world::Find;
 
 use super::Terrain;
 use super::mountains::{self, K as M};
@@ -42,6 +43,8 @@ kinds! {
     lily: 5, ["#4f8a3a"], walk_through;
     sail: 10, ["#e0d2b0", "#d4c5a2"];
     bronze: 3, ["#a87a3a"];
+    // Clipped hedges, dense enough to stand against: not walked through.
+    hedge: 5, ["#2f5a26", "#36652b", "#2a5122"];
 }
 
 /**
@@ -73,6 +76,12 @@ const STEEP: Units = Units::m(2.0);
 const POND_DEPTH: i64 = m(1.8);
 const POND_DROP: i64 = m(0.4);
 const POND_SHORE: i64 = m(3.0);
+/** A maze's cells along each side, its paths' width and its hedges', how tall they are: its side follows. */
+const MAZE_CELLS: usize = 11;
+const MAZE_PATH: i64 = m(1.6);
+const MAZE_HEDGE: i64 = m(0.8);
+const MAZE_TALL: i64 = m(2.3);
+const MAZE_SIDE: i64 = MAZE_CELLS as i64 * (MAZE_PATH + MAZE_HEDGE) + MAZE_HEDGE;
 
 /** What a landmark is. */
 #[derive(Clone, Copy, PartialEq, Eq, Default, Debug)]
@@ -84,10 +93,11 @@ pub enum Landmark {
     Pond,
     Farmstead,
     Windmill,
+    Maze,
 }
 
-pub const LANDMARKS: [Landmark; 6] =
-    [Landmark::Ruin, Landmark::Watchtower, Landmark::Chapel, Landmark::Pond, Landmark::Farmstead, Landmark::Windmill];
+pub const LANDMARKS: [Landmark; 7] =
+    [Landmark::Ruin, Landmark::Watchtower, Landmark::Chapel, Landmark::Pond, Landmark::Farmstead, Landmark::Windmill, Landmark::Maze];
 
 /** What a place is like, from the valley's ground before landmarks shape it: what a landmark stands by. */
 struct Place {
@@ -206,6 +216,17 @@ impl Landmark {
                 shaping: Shaping::Level(m(1.5)),
                 clearing: Units::m(10.0),
                 build: windmill,
+            },
+            Landmark::Maze => Spec {
+                suits: |p| p.town > Units::m(80.0) && p.town < Units::m(600.0) && p.path > Units::m(25.0) && p.prominence.0.abs() < m(1.5),
+                weight: 2,
+                size: |_| [MAZE_SIDE; 2],
+                most: [MAZE_SIDE; 2],
+                faces_path: true,
+                stands: Stands::Anywhere,
+                shaping: Shaping::Level(0),
+                clearing: Units::m(4.0),
+                build: maze,
             },
         }
     }
@@ -452,6 +473,27 @@ impl Landmarks {
         first.unwrap_or_else(|| panic!("no {landmark:?} within 64 km")).1
     }
 
+    /** The places it names: the chapel, windmill, pond and maze nearest the start, each on its ground. */
+    pub fn places(self: &Arc<Self>) -> Vec<(&'static str, Find)> {
+        let site = |name, landmark| -> (&'static str, Find) {
+            let landmarks = self.clone();
+            (
+                name,
+                Box::new(move || {
+                    let s = landmarks.first(landmark);
+                    [s.centre[0], s.level, s.centre[1]]
+                }),
+            )
+        };
+        // Ponds are narrower than the survey's sites: named, their water is found at any seed.
+        vec![
+            site("chapel", Landmark::Chapel),
+            site("windmill", Landmark::Windmill),
+            site("pond", Landmark::Pond),
+            site("maze", Landmark::Maze),
+        ]
+    }
+
     /** Whether the ground of the landmark nearest column (x, z) reaches within `margin` of it: what keeps off them asks. */
     pub fn reaches(&self, x: i64, z: i64, margin: i64) -> bool {
         self.sites.near(x, z, NEAR + margin).is_some_and(|(_, s)| s.outside(x, z).0 < past(s.clearing()) + margin)
@@ -505,6 +547,7 @@ fn spot(terrain: &Terrain, sites: &Claims<Site>, patches: &ValueNoise<{ m(3.0) }
         }
         Landmark::Farmstead if dx.abs() < hx - m(1.0) && dz.abs() < hz - m(1.0) && patch < fx(0.6) => Spot::Trodden,
         Landmark::Windmill if dx * dx + dz * dz < m(4.6) * m(4.6) => Spot::Trodden,
+        Landmark::Maze if d == Units(0) => Spot::Gravel,
         _ => Spot::Grass,
     }
 }
@@ -1125,4 +1168,83 @@ fn windmill(s: &Site, random: &mut Rng) -> Node {
         Child::new("stage", ANY_SIZE, Node::of(stage)),
         Child::new("sails", ANY_SIZE, thing(sails)),
     ])
+}
+
+/**
+ * A hedge maze: clipped hedges on a square of cells, a perfect maze dug
+ * from its middle by its seed (each cell reached once, by a random walk
+ * back-tracking where it is stuck), one way in from the front; the middle
+ * nine cells a garden, a sundial in it, topiary at its corners. The hedges
+ * are walls thinner than coarse sites: measured far away.
+ */
+fn maze(s: &Site, random: &mut Rng) -> Node {
+    const N: usize = MAZE_CELLS;
+    // The grid of the maze's blocks: odd by odd cells, even by even posts, the rest walls between cells, each standing or not.
+    let mut hedge = [[true; 2 * N + 1]; 2 * N + 1];
+    let mut seen = [[false; N]; N];
+    let mut stack = vec![(N / 2, N / 2)];
+    seen[N / 2][N / 2] = true;
+    hedge[N][N] = false;
+    while let Some(&(i, j)) = stack.last() {
+        let steps: Vec<(usize, usize)> = [(0, 1), (2, 1), (1, 0), (1, 2)]
+            .into_iter()
+            .filter_map(|(di, dj)| Some(((i + di).checked_sub(1)?, (j + dj).checked_sub(1)?)))
+            .filter(|&(a, b)| a < N && b < N && !seen[a][b])
+            .collect();
+        if steps.is_empty() {
+            stack.pop();
+            continue;
+        }
+        let (a, b) = steps[random.below(steps.len() as u32) as usize];
+        seen[a][b] = true;
+        hedge[2 * a + 1][2 * b + 1] = false;
+        hedge[i + a + 1][j + b + 1] = false;
+        stack.push((a, b));
+    }
+    // The garden in the middle, and the way in at the front.
+    let (g0, g1) = (2 * (N / 2 - 1) + 1, 2 * (N / 2 + 1) + 1);
+    for row in hedge.iter_mut().take(g1 + 1).skip(g0) {
+        row[g0..=g1].fill(false);
+    }
+    hedge[N][0] = false;
+    // Where block k starts along a side, and how wide it is.
+    let at = |k: usize| (k / 2) as i64 * (MAZE_PATH + MAZE_HEDGE) + if k % 2 == 1 { MAZE_HEDGE } else { 0 };
+    let wide = |k: usize| if k.is_multiple_of(2) { MAZE_HEDGE } else { MAZE_PATH };
+    let mut shapes = Vec::new();
+    let mut part = Part::new(s.frame(), &mut shapes);
+    let kind: Kind = K::hedge.into();
+    // Runs of standing blocks: along u in even rows, along w in even columns.
+    for k in (0..=2 * N).step_by(2) {
+        for along_u in [true, false] {
+            let standing = |l: usize| if along_u { hedge[l][k] } else { hedge[k][l] };
+            let mut l = 0;
+            while l <= 2 * N {
+                if !standing(l) {
+                    l += 1;
+                    continue;
+                }
+                let from = l;
+                while l <= 2 * N && standing(l) {
+                    l += 1;
+                }
+                let (a, b) = (at(from), at(l - 1) + wide(l - 1));
+                let (c, d) = (at(k), at(k) + MAZE_HEDGE);
+                if along_u {
+                    part.add([a, -m(0.3), c], [b, MAZE_TALL, d], kind);
+                } else {
+                    part.add([c, -m(0.3), a], [d, MAZE_TALL, b], kind);
+                }
+            }
+        }
+    }
+    // The garden: a sundial on a pedestal, a ball of topiary in each corner.
+    let mid = (MAZE_SIDE / 2) as f64;
+    part.lathe([mid, -2.0, mid], [mid, m(0.9) as f64, mid], move |t| 3.0 - t, T::churchStone, SOLID, Op::Fill);
+    part.lathe([mid, m(0.9) as f64, mid], [mid, (m(0.9) + 1) as f64, mid], 4.0, K::bronze, SOLID, Op::Fill);
+    part.add([MAZE_SIDE / 2, m(0.9) + 1, MAZE_SIDE / 2 - 3], [MAZE_SIDE / 2 + 1, m(0.9) + 4, MAZE_SIDE / 2 + 3], K::bronze);
+    let (c0, c1) = ((at(g0) + m(0.7)) as f64, (at(g1) + MAZE_PATH - m(0.7)) as f64);
+    for (u, w) in [(c0, c0), (c0, c1), (c1, c0), (c1, c1)] {
+        part.ball([u, m(0.6) as f64, w], m(0.6) as f64, kind, Op::Fill);
+    }
+    thing(shapes)
 }

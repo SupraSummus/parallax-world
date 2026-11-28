@@ -24,6 +24,7 @@ mod mine;
 use std::sync::{Arc, OnceLock};
 
 use worldgen::World;
+use worldgen::build::{dot, minus, unit};
 use worldgen::entry::{Entry, Known};
 use worldgen::generator::{Child, Field, Fill, Generator, Layer, Meets, Node, Op, Point, Population, Shadows, Shape, ball};
 use worldgen::js;
@@ -197,20 +198,6 @@ fn tunnels(seeds: Seeds, min: [i64; 3], max: [i64; 3], spacing: i64, hold: &Scal
             carved(radius, spacing).then(|| Shape::capsule(from, to, radius as f64, K::cheese).carve())
         })
     })
-}
-
-fn dot(a: [f64; 3], b: [f64; 3]) -> f64 {
-    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
-}
-
-fn minus(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
-    [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
-}
-
-/** `v` made a unit long. */
-fn unit(v: [f64; 3]) -> [f64; 3] {
-    let l = dot(v, v).sqrt();
-    v.map(|c| c / l)
 }
 
 /** How far `p` is outside the ball at `centre` of `radius`: under 0 inside it. */

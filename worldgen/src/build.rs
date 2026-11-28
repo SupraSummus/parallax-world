@@ -271,3 +271,32 @@ impl Shape {
         self
     }
 }
+
+// Points as vectors: what worlds aim and offset shapes by.
+
+pub fn plus(a: Point, b: Point) -> Point {
+    [a[0] + b[0], a[1] + b[1], a[2] + b[2]]
+}
+
+pub fn minus(a: Point, b: Point) -> Point {
+    [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
+}
+
+pub fn scale(a: Point, k: f64) -> Point {
+    a.map(|v| v * k)
+}
+
+pub fn dot(a: Point, b: Point) -> f64 {
+    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+}
+
+/** `a` made a unit long. */
+pub fn unit(a: Point) -> Point {
+    let l = dot(a, a).sqrt();
+    a.map(|v| v / l)
+}
+
+/** The point `t` of the way from `a` to `b`. */
+pub fn lerp(a: Point, b: Point, t: f64) -> Point {
+    plus(a, scale(minus(b, a), t))
+}
