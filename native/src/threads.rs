@@ -61,14 +61,15 @@ impl Drop for Sleepers {
     }
 }
 
+/** `f` on a thread of its own. */
 #[cfg(not(target_arch = "wasm32"))]
-fn spawn(f: impl FnOnce() + Send + 'static) {
+pub fn spawn(f: impl FnOnce() + Send + 'static) {
     std::thread::spawn(f);
 }
 
 /** `f` on a Web Worker of its own, on this module and its memory (index.html's `spawnThread`, web/worker.js). */
 #[cfg(target_arch = "wasm32")]
-fn spawn(f: impl FnOnce() + Send + 'static) {
+pub fn spawn(f: impl FnOnce() + Send + 'static) {
     use wasm_bindgen::prelude::*;
     #[wasm_bindgen]
     extern "C" {

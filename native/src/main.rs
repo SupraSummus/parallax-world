@@ -63,8 +63,8 @@ struct Args {
     /** The render distance, in lattice units. */
     #[arg(long, value_name = "UNITS", default_value_t = RENDER_DISTANCE, help_heading = "View")]
     distance: f64,
-    /** Light worked out across the world (light/): how bright the sky, the sun and what glows are (1,1,0 a clear day, 0.01,0,1 night); the steps light takes along each level before the coarser one takes over; how little of the light on a site is not followed (light's TOLERANCE). Without it, voxels are shaded by the way their faces face. */
-    #[arg(long, value_name = "SKY,SUN,GLOW[,STEPS[,TOLERANCE]]", value_parser = parse_light, help_heading = "View")]
+    /** Light worked out across the world (light/): how bright the sky, the sun and what glows are (1,1,0 a clear day, 0.01,0,1 night); how little of the light on a site is not followed (light's TOLERANCE). Without it, voxels are shaded by the way their faces face. */
+    #[arg(long, value_name = "SKY,SUN,GLOW[,TOLERANCE]", value_parser = parse_light, help_heading = "View")]
     light: Option<Light>,
     /** That light kept settled site by site as it changes (light's relax.rs, docs/light.md), not found anew: shown as it settles. */
     #[arg(long, requires = "light", help_heading = "View")]
@@ -145,21 +145,20 @@ fn parse_size(v: &str) -> Result<[f64; 2], String> {
     numbers::<2>(&v.replace('x', ","))
 }
 
-/** --light: how bright, and if given, the steps and the tolerance. */
+/** --light: how bright, and if given, the tolerance. */
 #[derive(Clone, Copy)]
 struct Light {
     brightness: Brightness,
-    steps: Option<usize>,
     tolerance: Option<f32>,
 }
 
 fn parse_light(v: &str) -> Result<Light, String> {
     let v: Vec<f32> = v.split(',').map(|v| v.trim().parse::<f32>().map_err(|e| format!("{v:?}: {e}"))).collect::<Result<_, _>>()?;
     let [sky, sun, glow, ..] = v[..] else { return Err("at least 3 numbers".into()) };
-    if v.len() > 5 {
-        return Err("at most 5 numbers".into());
+    if v.len() > 4 {
+        return Err("at most 4 numbers".into());
     }
-    Ok(Light { brightness: Brightness { sky, sun, glow }, steps: v.get(3).map(|&s| s as usize), tolerance: v.get(4).copied() })
+    Ok(Light { brightness: Brightness { sky, sun, glow }, tolerance: v.get(3).copied() })
 }
 
 impl Light {
@@ -169,9 +168,9 @@ impl Light {
      * all the world made.
      */
     fn on(self, shared: &Shared) -> Option<Shared> {
-        let (steps, tolerance) = (self.steps.unwrap_or(shared.steps()), self.tolerance.unwrap_or(shared.tolerance()));
-        let same = (self.brightness, steps, tolerance) == (shared.brightness(), shared.steps(), shared.tolerance());
-        (!same).then(|| shared.under(self.brightness).stepping(steps).settling(tolerance))
+        let tolerance = self.tolerance.unwrap_or(shared.tolerance());
+        let same = (self.brightness, tolerance) == (shared.brightness(), shared.tolerance());
+        (!same).then(|| shared.under(self.brightness).settling(tolerance))
     }
 }
 
@@ -183,7 +182,7 @@ fn parse_eye(v: &str) -> Result<Eye, String> {
 /** How `shared` lights a world, as --light takes it. */
 fn light_arg(shared: &Shared) -> String {
     let b = shared.brightness();
-    format!("{},{},{},{},{}", b.sky, b.sun, b.glow, shared.steps(), shared.tolerance())
+    format!("{},{},{},{}", b.sky, b.sun, b.glow, shared.tolerance())
 }
 
 /** `value` as an option names it. */
@@ -243,9 +242,8 @@ struct View {
     world_args: String,
     look: Look,
     lighting: Lighting,
-    /** How bright the sky, the sun and what glows are, Computed, the steps light takes along each level and how little it may change to be found, as the sliders say: the world is lit so once one is let go. */
+    /** How bright the sky, the sun and what glows are, Computed, and how little it may change to be found, as the sliders say: the world is lit so once one is let go. */
     brightness: Brightness,
-    steps: usize,
     tolerance: f32,
     /** Units a second the camera flies at (walking keeps walk.rs's own). */
     speed: f64,
@@ -274,7 +272,6 @@ impl View {
             look: Look::new(spawn, args.look, args.fov, args.distance, SHOT),
             lighting: Lighting::Shaded,
             brightness: shared.brightness(),
-            steps: shared.steps(),
             tolerance: shared.tolerance(),
             speed: args.speed,
             walker: None,
@@ -296,7 +293,7 @@ impl View {
         }
         self.kind = args.engine;
         let shared = self.world.shared().expect("a world with light");
-        (self.brightness, self.steps, self.tolerance) = (shared.brightness(), shared.steps(), shared.tolerance());
+        (self.brightness, self.tolerance) = (shared.brightness(), shared.tolerance());
         self.lighting = match (args.light.is_some(), args.settle) {
             (false, _) => Lighting::Shaded,
             (true, false) => Lighting::Computed,
@@ -451,15 +448,12 @@ impl View {
         for (value, name) in [(&mut b.sky, "Sky"), (&mut b.sun, "Sun"), (&mut b.glow, "Glow")] {
             responses.push(ui.add(egui::Slider::new(value, 0.0..=10.0).logarithmic(true).smallest_positive(0.01).text(name)));
         }
-        // More steps a level, the thicker a wall must be to let light through: about its distance over them.
-        // Few: past three, each direction reads too little of what it stands for, and lighting takes many times longer (docs/light.md).
-        responses.push(ui.add(egui::Slider::new(&mut self.steps, 1..=3).text("Steps a Level")));
         // Less, the more rounds of bounces where light bounces back and forth.
         responses.push(ui.add(egui::Slider::new(&mut self.tolerance, 1e-4..=0.5).logarithmic(true).text("Tolerance")));
         let settled = self.lighting == Lighting::Settled;
         let done = responses.iter().any(|r| r.drag_stopped() || r.changed() && (!r.dragged() || settled));
         let shared = self.world.shared().expect("a world with light");
-        let light = Light { brightness: self.brightness, steps: Some(self.steps), tolerance: Some(self.tolerance) };
+        let light = Light { brightness: self.brightness, tolerance: Some(self.tolerance) };
         if done
             && let Some(relit) = light.on(shared)
             && self.world.relight(relit)

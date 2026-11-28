@@ -1,19 +1,22 @@
 //! The light kept settled on a thread of its own (light's relax.rs), for
-//! the voxels engine. A brick is lit when asked for and again when its
+//! the voxels engine, its sites' lines found on as many as the world is
+//! made on (Finders). A brick is lit when asked for and again when its
 //! light changes, once its voxels' light was found, at most every AGAIN but
-//! when all is settled. The world puts what it lights in their tiles
-//! (World::update), so what is shown settles as the light does.
+//! when all is settled; those of tiles the world lets go, it lets go. The
+//! world puts what it lights in their tiles (World::update), so what is
+//! shown settles as the light does.
 
 use std::sync::Arc;
-use std::sync::mpsc::{Receiver, TryRecvError};
+use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};
 
 use lattice::{BRICK, FastMap, FastSet, Grid};
 use light::Shared;
-use light::relax::Settling;
+use light::relax::{Finder, Lines, Settling};
 use web_time::{Duration, Instant};
 use worldgen::grid::Box3;
 
 use crate::engine::voxels;
+use crate::threads;
 use crate::world::{TILE, TileId, behind_drawing};
 
 /** Sites found between looks at the orders: a few milliseconds' worth. */
@@ -29,6 +32,8 @@ pub enum Order {
     Light(Shared),
     /** The world was edited within this box (level-0 sites). */
     Edited(Box3),
+    /** The world let go of these tiles of this level: their bricks are no longer to light. */
+    Forget(usize, Vec<TileId>),
 }
 
 /** What it tells the world. */
@@ -50,10 +55,12 @@ pub struct Lit {
 /** A brick, by level and where its sites start. */
 type Brick = (usize, [i32; 3]);
 
-/** Lights what `orders` say of `world`, lit as `shared` says, telling what it does by `tell`, till the orders are gone. */
-pub fn run(world: Arc<worldgen::World>, shared: Shared, orders: Receiver<Order>, tell: impl Fn(Told)) {
+/** Lights what `orders` say of `world`, lit as `shared` says, its lines found on `threads` threads, telling what it does by `tell`, till the orders are gone. */
+pub fn run(world: Arc<worldgen::World>, shared: Shared, threads: usize, orders: Receiver<Order>, tell: impl Fn(Told)) {
     behind_drawing();
-    let mut light = (shared.clone(), Settling::new(world.clone(), shared));
+    let finders = Finders::spawn(threads);
+    let mut settling = Settling::new(world.clone(), shared);
+    finders.lend(&settling);
     // The bricks asked for, each with its tile's grid, and those to light.
     let (mut shown, mut due): (FastMap<Brick, Arc<Grid>>, FastSet<Brick>) = Default::default();
     let (mut read, mut lit_at) = (0, Instant::now());
@@ -65,32 +72,45 @@ pub fn run(world: Arc<worldgen::World>, shared: Shared, orders: Receiver<Order>,
                     match order {
                         Order::Bricks(bricks) => {
                             for (level, corner, grid) in bricks {
-                                ask(&mut light.1, level, corner, &grid);
-                                shown.insert((level, corner), grid);
+                                // A tile made again: its voxels as they were are let go, and asked for as they are.
+                                if let Some(was) = shown.insert((level, corner), grid.clone()) {
+                                    voxels_of(&was, corner).for_each(|site| settling.forget(level as u32, site));
+                                }
+                                voxels_of(&grid, corner).for_each(|site| settling.ask(level as u32, site));
                                 due.insert((level, corner));
                             }
                         }
-                        Order::Light(shared) if (shared.steps(), shared.tolerance()) == (light.0.steps(), light.0.tolerance()) => {
-                            light.1.under(shared.brightness());
-                            light.0 = shared;
+                        Order::Light(shared) if shared.tolerance() == settling.tolerance() => {
+                            settling.under(shared.brightness());
                         }
                         // Its lines are others: all found anew, and shown as they are.
                         Order::Light(shared) => {
-                            light = (shared.clone(), Settling::new(world.clone(), shared));
+                            settling = Settling::new(world.clone(), shared);
+                            finders.lend(&settling);
                             for (&(level, corner), grid) in &shown {
-                                ask(&mut light.1, level, corner, grid);
+                                voxels_of(grid, corner).for_each(|site| settling.ask(level as u32, site));
                             }
                             due.extend(shown.keys());
                         }
-                        Order::Edited(b) => light.1.edited(b),
+                        Order::Edited(b) => settling.edited(b),
+                        Order::Forget(level, tiles) => {
+                            let tiles: FastSet<TileId> = tiles.into_iter().collect();
+                            shown.retain(|&(l, corner), grid| {
+                                let kept = l != level || !tiles.contains(&corner.map(|v| v.div_euclid(TILE as i32)));
+                                if !kept {
+                                    due.remove(&(l, corner));
+                                    voxels_of(grid, corner).for_each(|site| settling.forget(level as u32, site));
+                                }
+                                kept
+                            });
+                        }
                     }
                 }
                 Err(TryRecvError::Empty) => break,
                 Err(TryRecvError::Disconnected) => return,
             }
         }
-        let settling = &mut light.1;
-        let found = settling.settle(BUDGET);
+        let found = settling.settle(BUDGET, |lines| finders.find(lines));
         for (level, site) in settling.changed() {
             let brick = (level as usize, site.map(|v| v as i32 & !(BRICK - 1)));
             if shown.contains_key(&brick) {
@@ -99,7 +119,7 @@ pub fn run(world: Arc<worldgen::World>, shared: Shared, orders: Receiver<Order>,
         }
         if !due.is_empty() && (lit_at.elapsed() >= AGAIN || settling.settled()) {
             lit_at = Instant::now();
-            for lit in light_bricks(settling, &shown, &mut due) {
+            for lit in light_bricks(&mut settling, &shown, &mut due) {
                 tell(Told::Lit(lit));
             }
         }
@@ -110,10 +130,69 @@ pub fn run(world: Arc<worldgen::World>, shared: Shared, orders: Receiver<Order>,
     }
 }
 
-/** Asks `settling` for the light of the voxels of brick `corner` of `level`, of `grid`. */
-fn ask(settling: &mut Settling, level: usize, corner: [i32; 3], grid: &Grid) {
-    for site in voxels_of(grid, corner) {
-        settling.ask(level as u32, site);
+/** Threads that find lines, each with a Finder of the Settling it was last lent (`lend`); dropped, they end. */
+struct Finders {
+    jobs: Vec<Sender<Job>>,
+    found: Receiver<(usize, Vec<Lines>)>,
+}
+
+enum Job {
+    Lend(Box<Finder>),
+    Find(usize, Vec<Lines>),
+}
+
+impl Finders {
+    /** As many threads, for the settler's life: a browser's do not end. */
+    fn spawn(threads: usize) -> Finders {
+        let (give, found) = channel();
+        let jobs = (0..threads)
+            .map(|_| {
+                let ((jobs, taken), give) = (channel(), give.clone());
+                threads::spawn(move || {
+                    behind_drawing();
+                    let mut finder = None;
+                    for job in taken {
+                        match job {
+                            Job::Lend(lent) => finder = Some(*lent),
+                            Job::Find(i, mut lines) => {
+                                lines.iter_mut().for_each(|lines| lines.find(finder.as_mut().expect("a Finder lent")));
+                                if give.send((i, lines)).is_err() {
+                                    return;
+                                }
+                            }
+                        }
+                    }
+                });
+                jobs
+            })
+            .collect();
+        Finders { jobs, found }
+    }
+
+    /** Has its threads find `settling`'s lines from now on. */
+    fn lend(&self, settling: &Settling) {
+        self.jobs.iter().for_each(|jobs| jobs.send(Job::Lend(Box::new(settling.finder()))).expect("finders"));
+    }
+
+    /**
+     * `lines` found on its threads, given back in order: four runs a
+     * thread, each of sites near one another, which read the same tiles,
+     * and one message each way.
+     */
+    fn find(&self, lines: Vec<Lines>) -> Vec<Lines> {
+        let run = lines.len().div_ceil(4 * self.jobs.len());
+        let (mut lines, mut runs) = (lines.into_iter(), 0);
+        loop {
+            let some: Vec<Lines> = lines.by_ref().take(run).collect();
+            if some.is_empty() {
+                break;
+            }
+            self.jobs[runs % self.jobs.len()].send(Job::Find(runs, some)).expect("finders");
+            runs += 1;
+        }
+        let mut found: Vec<_> = self.found.iter().take(runs).collect();
+        found.sort_unstable_by_key(|&(i, _)| i);
+        found.into_iter().flat_map(|(_, lines)| lines).collect()
     }
 }
 

@@ -7,11 +7,11 @@
 //! step along an edge's direction goes through one of the two sites beside
 //! the edge, then the one past it, half the light each way (`HALVES`).
 //! Along each direction from the sites of its level, as every level does:
-//! a few steps (Shared's, STEPS unless set), then on till the line leaves
-//! the cube of the next coarser level's site it is in, whose light from
-//! that direction comes from past it, if that site has room for light
-//! (`along`). So a wall thinner than a coarse cube in a level's steps may
-//! let light through: more steps, less leaks.
+//! a step, then on till the line leaves the cube of the next coarser
+//! level's site it is in, whose light from that direction comes from past
+//! it, if that site has room for light (`along`). Only a step: with 18
+//! directions, lines further along a level pass between sites none reads,
+//! where coarser sites, as wide as the lines are apart, leave none out.
 //! Each site sends what it glows, and of what it stops (its alpha, a
 //! medium's by channel) its colour times the light on the face it is seen
 //! through (`meets`, `on_face`), a third of what it shows that way; the
@@ -146,8 +146,7 @@ static ENTERS: [&[usize]; N] = {
     enters
 };
 
-/** Steps along a direction before the coarser level's light may take over, unless set (Shared::stepping), and at most, where none does: in a closed place, or a world with no heights. */
-const STEPS: usize = 1;
+/** Steps along a direction at most, where the coarser level's light does not take over: in a closed place, or a world with no heights. */
 const MOST_STEPS: usize = 64;
 /**
  * How little of the light on a site is not followed, unless set
@@ -345,9 +344,8 @@ impl Kept {
 }
 
 /**
- * What the Lights of one world under one brightness, and taking as many
- * steps along each level, share (a thread's each), and the host with
- * them: the world's tiles of every level, with all the Lights find at
+ * What the Lights of one world under one brightness share (a thread's
+ * each), and the host with them: the world's tiles of every level, with all the Lights find at
  * their sites, so each tile is made once, and each site's light found
  * once, whichever thread lights beside it. Tiles are kept till the host
  * forgets them (`forget`); the light of a tile, while Lights read it (`begun`).
@@ -355,7 +353,6 @@ impl Kept {
 #[derive(Clone)]
 pub struct Shared {
     brightness: Brightness,
-    steps: usize,
     tolerance: f32,
     made: Arc<Kept>,
     /** Sites whose light was begun, so far, by level (`begun`). */
@@ -367,7 +364,7 @@ pub struct Shared {
 impl Shared {
     /** Nothing made yet, for a world under `brightness`. */
     pub fn new(brightness: Brightness) -> Shared {
-        Shared { brightness, steps: STEPS, tolerance: TOLERANCE, made: Arc::default(), begun: Arc::default(), forgotten: Arc::default() }
+        Shared { brightness, tolerance: TOLERANCE, made: Arc::default(), begun: Arc::default(), forgotten: Arc::default() }
     }
 
     pub fn brightness(&self) -> Brightness {
@@ -383,17 +380,6 @@ impl Shared {
     /** The same world under `brightness`: its tiles' sites kept. */
     pub fn under(&self, brightness: Brightness) -> Shared {
         Shared { brightness, ..self.unlit() }
-    }
-
-    /** Steps along a direction before the coarser level's light may take over. */
-    pub fn steps(&self) -> usize {
-        self.steps
-    }
-
-    /** The same world, light taking `steps` steps along each level before the coarser's: its tiles' sites kept. */
-    pub fn stepping(&self, steps: usize) -> Shared {
-        assert!((1..=MOST_STEPS).contains(&steps), "{steps} steps");
-        Shared { steps, ..self.unlit() }
     }
 
     /** How little of the light on a site is not followed (TOLERANCE). */
@@ -960,7 +946,7 @@ impl Light {
     /**
      * What comes to `p`, a site of level `i`, from direction `d`, all
      * but reflected light (Line): from the sites that way, what each
-     * glows; past them, the coarser level's light. After Shared's steps, once the
+     * glows; past them, the coarser level's light. After a step, once the
      * line is to leave the cube of the coarser site it is in, the coarser
      * level's light from `d` through the face it leaves by (`coarser`), if
      * that site has room for light: it comes from past the cube, all the
@@ -973,7 +959,7 @@ impl Light {
      * lit alike. What is still owed where the line ends is left out.
      */
     fn along(&mut self, i: usize, p: [i64; 3], around: &Around, work: &mut Work, d: usize) -> Line {
-        let (v, heights, steps) = (DIRECTIONS[d], self.levels[i].heights, self.shared.steps);
+        let (v, heights) = (DIRECTIONS[d], self.levels[i].heights);
         let coarser = i + 1 < self.levels.len();
         // What has come so far, and how much of what comes from further on gets through.
         let (mut sum, mut through) = ([0.0f32; 3], [1.0f32; 3]);
@@ -986,7 +972,7 @@ impl Light {
                 let next = add(q, v);
                 let cube = coarse(q);
                 let leaves = (0..3).find(|&a| coarse(next)[a] != cube[a]);
-                if let Some(across) = leaves.filter(|_| coarser && step > steps && work.open(self, i + 1, cube) > 0.0) {
+                if let Some(across) = leaves.filter(|_| coarser && step > 1 && work.open(self, i + 1, cube) > 0.0) {
                     break 'march self.coarser(i + 1, work, q, across);
                 }
                 // The parts of the step, each with its share of the light: across an edge, a site beside it, half
