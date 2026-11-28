@@ -67,14 +67,18 @@ fn heights(sites: &[[i64; 3]]) -> (i64, i64) {
     (sites.iter().map(|s| s[1]).min().expect("sites"), sites.iter().map(|s| s[1]).max().expect("sites"))
 }
 
-#[test]
-fn a_post_on_a_stump_under_half_of_it_topples_off_it_and_lies() {
-    let ground = |s: [i64; 3]| match s[1] {
+/** The ground under y = −1, and on it a stump under half of a post's foot, its −x half. */
+fn stump(s: [i64; 3]) -> bool {
+    match s[1] {
         ..-1 => true,
         -1 => (0..2).contains(&s[0]) && (0..4).contains(&s[2]),
         _ => false,
-    };
-    let (mut world, mut matter) = wake(post(1), &ground, 0);
+    }
+}
+
+#[test]
+fn a_post_on_a_stump_under_half_of_it_topples_off_it_and_lies() {
+    let (mut world, mut matter) = wake(post(1), &stump, 0);
     let sites = run(&mut matter, &mut world);
     assert!(heights(&sites).1 < 12, "lying: {:?}", heights(&sites));
     assert!(sites.iter().any(|s| s[0] > 25), "off the side it is not borne on, +x");
@@ -124,11 +128,11 @@ fn a_post_over_the_edge_of_another_stands_if_they_hold_on_and_topples_off_if_not
 fn a_beam_spinning_in_the_air_keeps_its_length() {
     let nothing = |_: [i64; 3]| false;
     let (mut world, mut matter) = wake(block([0, 0, 0], [16, 1, 1]), &nothing, 0);
-    let middle = matter.pose.iter().fold([0.0; 3], |m, p| add(m, scale(p.x, 1.0 / matter.pose.len() as f64)));
+    let middle = matter.body.iter().fold([0.0; 3], |m, b| add(m, scale(b.x, 1.0 / matter.body.len() as f64)));
     // Two turns a second about z.
     let spin = [0.0, 0.0, 4.0 * std::f64::consts::PI];
-    for (p, m) in matter.pose.iter().zip(&mut matter.motion) {
-        *m = Motion { v: cross(spin, sub(p.x, middle)), w: spin };
+    for b in &mut matter.body {
+        (b.v, b.w) = (cross(spin, sub(b.x, middle)), spin);
     }
     // Its end cells, as woken: they hop from site to site as it turns.
     let length = |m: &Matter<()>| len(sub(m.middle(15), m.middle(0)));
@@ -161,7 +165,7 @@ fn a_beam_out_of_a_wall_holds_if_short_and_breaks_at_the_wall_if_long() {
     }
     assert_eq!(short.broke, 0, "nothing breaks");
     // w L⁴ / 8 E I, I = h⁴ / 12, at the middle of the last cell.
-    let (l, w) = (9.5 * UNIT, weak.rho * GRAVITY * UNIT * UNIT);
+    let (l, w) = (9.5 * UNIT, weak.rho * -GRAVITY[1] * UNIT * UNIT);
     let theory = w * l.powi(4) / (8.0 * weak.e * UNIT.powi(4) / 12.0);
     assert!((-tip / theory - 1.0).abs() < 0.5, "sags {:.3e} m, beam theory {theory:.3e}", -tip);
     let (mut world, mut long) = beam(40);
@@ -204,4 +208,19 @@ fn a_beam_a_level_up_breaks_by_what_of_its_faces_holds_on() {
     // 40 and 10 cells of level 0, 20 and 5 here.
     assert!(broke(20), "the long one breaks");
     assert!(!broke(5), "the short one holds");
+}
+
+/** A post toppling off a stump, chaotic as that is, moves alike on one thread and on several: each cell sums its springs in one order. */
+#[test]
+fn threads_change_nothing() {
+    let topple = |threads: usize| {
+        let (mut world, mut matter) = wake(post(1), &stump, 0);
+        matter.threads = threads;
+        while matter.time < 0.2 {
+            matter.step(&mut world);
+        }
+        assert!(threads == 1 || matter.bonds.len() / SPRINGS_A_THREAD >= threads, "on {threads} threads");
+        (0..matter.cells.len()).map(|i| matter.middle(i)).collect::<Vec<_>>()
+    };
+    assert_eq!(topple(1), topple(4));
 }
