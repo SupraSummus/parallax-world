@@ -174,7 +174,7 @@ Numbers are for the forest at 1280×800, as measured when written.
   one record a site would be read and written once, not twice,
   for memory not measured.
 - **Plans are made at every column read, whatever their scale.**
-  The valley's land, decided at 4 m, makes its six parts' bids
+  The valley's land, decided at 4 m, makes its seven parts' bids
   at each column of a tile at level 0.
   Bids made every 4 m and interpolated (tried) cost as many instructions:
   most of a bid is the terrain, which the ground makes there anyway;
@@ -305,6 +305,17 @@ Numbers are for the forest at 1280×800, as measured when written.
 
 ## Worlds
 
+- **A shape can't recolour only what is there.**
+  `Op::Paint` draws over empty sites too (a fountain's water is a paint),
+  so a shell of another kind round a hollow (limestone round a cave,
+  moss on a rock, snow on a roof) stands in the air where the shell leaves the ground.
+  An op that paints only sites already held would make one;
+  fields of spans paint a ground's top so (`Column::surface`), shapes cannot.
+- **Things fill coarse sites a carve left in part.**
+  The caves' rubble, filling the bowl of a chamber dug by a field,
+  stops a sixth less at level 2 and over than two levels finer
+  (`worlds/data/contract/valley.txt`), as boulders half sunk in the ground do:
+  a fill takes only what is empty, and a coarse site at a hollow's wall is neither.
 - **A part can't stand in a world twice.**
   Its layers are known by their names alone (`Layer::name`):
   two forests' trees would be one layer to `alone`, the survey and cost,
@@ -831,6 +842,8 @@ Numbers are for the forest at 1280×800, as measured when written.
   Some are left from when its cells were asked: the towns' is 256 m, 2 km apart.
   Each said where it is meant would leave N to the default points.
 - `Claims` propose their spots by a Poisson process of their own, as `Points` do.
+- Parts claiming things try a few places round each spot, each part in a loop of its own
+  (landmarks, caves, the coast, the badlands); `Claims` could try them itself.
   On `Points` they would need cells a power of two wide, their chance the rest.
 - Where a population stands could be a scalar too (`Population::within`):
   on a ground, N less how far above or below it a point is (`on`),

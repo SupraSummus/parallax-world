@@ -93,14 +93,24 @@ each level of detail reaches twice as far as the one before, to 11 km.
   and steadings of a drystone hut, walked into, and a ring of standing stones,
   on gentle ground.
   Landmarks standing alone: a ruined keep on a hilltop, a watchtower,
-  wayside chapels, ponds, farmsteads and windmills.
+  wayside chapels, ponds, farmsteads, windmills, and now and then a hedge maze
+  with a garden in its middle.
+  Caves open in the mountains' faces, framed by rocks:
+  passages winding in to chambers hung with dripstone,
+  lit by glow-worms; deep in, a pool or crystals,
+  and in the first, a camp someone left, its lantern still lit.
   The valley winds, its path along the lowest of its floor.
   Mountain ranges along both sides: crests, peaks and passes, side valleys,
   arêtes and cirques behind the crests,
   meadows and scree above the treeline, snow in high hollows.
   Past a few kilometres of them the land leaves the ranges:
   west, a lowland falling to the sea, its coast ragged with bays and islands;
-  east, an upland under the treeline, moor and forest.
+  east, an upland under the treeline, moor and forest,
+  and patches of badlands kilometres across:
+  red rock banded in strata, sand and scrub, bleached dead trees,
+  hoodoos, buttes and arches.
+  On the western shore, lighthouses on its headlands, lit at night,
+  and wrecks on its beaches.
   A railway up one side of the valley,
   laid on the ground as it is, along the slopes where that spares it earthworks:
   ballast, sleepers and rails in cuttings and on embankments,

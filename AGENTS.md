@@ -103,17 +103,20 @@ worlds/                      # The worlds, on worldgen's and ground's public API
 │   │   ├── course.rs        # The valley's course and its path's route
 │   │   ├── town.rs          # Towns along the path
 │   │   ├── fields.rs        # Farmland around them
-│   │   ├── landmarks.rs     # Keeps, chapels, ponds, farmsteads, windmills
+│   │   ├── landmarks.rs     # Keeps, chapels, ponds, farmsteads, windmills, mazes
 │   │   ├── moor.rs          # The moor; alone, the worlds moor and fog
 │   │   ├── mountains.rs     # The valley's ranges
-│   │   └── railway.rs       # The valley's railway
+│   │   ├── railway.rs       # The valley's railway
+│   │   ├── caves.rs         # Caves in the mountains' faces
+│   │   ├── badlands.rs      # Red rock east of the ranges
+│   │   └── coast.rs         # Lighthouses and wrecks by the sea
 │   ├── city.rs              # The city: blocks of buildings on a plan
 │   ├── learned.rs           # Settlements drawn by a grammar learned in lab/
 │   └── scene.rs             # Scenes made elsewhere, read from a file
 ├── data/                    # Baselines of cost and contract, the forest's stands, the town grammar;
 │                            # scenes/ is not in git (docs/generators.md, "Scenes")
 ├── tests/                   # Its worlds keep the contract and their cost baselines (checks.rs); scenes
-└── examples/                # map, look, check, cost, bench: a world looked at, checked, measured
+└── examples/                # map, look, places, check, cost, bench: a world looked at, checked, measured
 mechanics/src/               # Mechanics on the voxels (docs/mechanics.md), driven by native/src/fall.rs
 ├── lib.rs                   # Matter: cells welded across faces where both hold on, contacts; a step; hops
 ├── element.rs               # A cell as a finite element: a co-rotated cube of eight nodes
