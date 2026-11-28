@@ -1,0 +1,9 @@
+[package]
+name = "local"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+lattice = { path = "../lattice" }
+mechanics = { path = "../mechanics" }

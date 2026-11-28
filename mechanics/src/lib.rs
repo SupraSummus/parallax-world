@@ -36,7 +36,7 @@ pub const WOOD: Material = Material { rho: 600.0, e: 10e9, tension: 40e6, compre
 
 impl Material {
     /** Where two meet, the weaker of each. */
-    fn meet(self, o: Material) -> Material {
+    pub fn meet(self, o: Material) -> Material {
         let min = |a: f64, b: f64| a.min(b);
         Material {
             rho: min(self.rho, o.rho),
