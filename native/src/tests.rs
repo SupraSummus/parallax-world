@@ -12,7 +12,7 @@ fn the_options_are_well_formed() {
 #[test]
 fn a_view_gives_back_the_options_it_takes() {
     let options = "--engine flat --camera 1.5,-2,3 --look -30,10 --fov 70 --distance 500 --detail 4 --shift 2 --apart 6 --colour layers \
-                   --size 320x200 --light 0.5,1,0,3,0.01 --eye -1,0.5 --seams --unhidden --walk";
+                   --size 320x200 --light 0.5,1,0,0.01 --eye -1,0.5 --seams --unhidden --walk";
     let argv: Vec<String> =
         ["", "--world", "moor", "--threads", "1"].into_iter().chain(options.split_whitespace()).map(str::to_string).collect();
     assert_eq!(View::new(&parse(&argv)).options(), options.split_whitespace().collect::<Vec<_>>().join(" "));
@@ -395,7 +395,7 @@ fn frames_come_till_a_world_lit_anew_shows() {
     look.light = Some(day);
     let (mut engine, mut easel) = (Kind::Voxels.make(&world), Easel::offscreen(None));
     assert!(frames_till_still(&mut *engine, &mut world, &look, &mut easel), "lit at first");
-    for shared in [world.shared().expect("light").under(dusk), world.shared().expect("light").under(dusk).stepping(3)] {
+    for shared in [world.shared().expect("light").under(dusk), world.shared().expect("light").under(dusk).settling(0.05)] {
         look.light = Some(shared.brightness());
         world.relight(shared);
         engine = Kind::Voxels.make(&world);

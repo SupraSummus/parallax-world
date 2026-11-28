@@ -232,7 +232,8 @@ Till a brick with voxels is lit, it is not on the GPU, as if no ray had asked fo
 what is not lit yet shows coarser, lit, never shaded by another light.
 A tile never changes but for its bricks' light, each found once.
 Settled (`--settle`), one thread lights them instead (`native/src/settler.rs`),
-by light kept settled as it changes (light's `Settling`, [light.md](light.md)):
+by light kept settled as it changes (light's `Settling`, [light.md](light.md)),
+its sites' lines found on as many threads as the world is made on:
 a brick once each of its voxels' light was found,
 and again as that light changes,
 its tile replaced by one with the new light, which the engine places anew.

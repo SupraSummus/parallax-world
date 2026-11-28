@@ -298,9 +298,10 @@ struct Settler {
 }
 
 impl Settler {
-    fn spawn(world: Arc<worldgen::World>, shared: Shared, send: Sender<Done>) -> Settler {
-        let orders =
-            Post::spawn(|orders| vec![move || settler::run(world, shared, orders, move |told| _ = send.send(Done::Settled(told)))]);
+    /** A settler of `world` lit by `shared`, finding lines on `threads` threads, telling the world by `send`. */
+    fn spawn(world: Arc<worldgen::World>, shared: Shared, threads: usize, send: Sender<Done>) -> Settler {
+        let settle = move |orders| settler::run(world, shared, threads, orders, move |told| _ = send.send(Done::Settled(told)));
+        let orders = Post::spawn(|orders| vec![move || settle(orders)]);
         Settler { orders, sent: 0, read: 0, pending: FastSet::default() }
     }
 
@@ -620,7 +621,7 @@ impl World {
 
     /**
      * Lights the world anew by `shared`, its own light under another
-     * brightness or steps (Shared::under, Shared::stepping): the tiles made
+     * brightness or tolerance (Shared::under, Shared::settling): the tiles made
      * are kept, their light to find again, and what is being lit lights
      * tiles let go; engines that read its light (Lit) are to be made again,
      * as it returns. Kept settled (`settle`), the light settles anew where
@@ -644,7 +645,7 @@ impl World {
      */
     pub fn settle(&mut self, settled: bool) -> bool {
         let Some(shared) = self.shared.clone().filter(|_| settled != self.settler.is_some()) else { return false };
-        self.settler = settled.then(|| Settler::spawn(self.world.clone(), shared, self.send.clone()));
+        self.settler = settled.then(|| Settler::spawn(self.world.clone(), shared, self.threads, self.send.clone()));
         self.unlight();
         true
     }
@@ -806,6 +807,10 @@ impl World {
         if !dropped.is_empty() {
             for &id in &dropped {
                 self.stale.remove(&(level, id));
+            }
+            if let Some(settler) = &mut self.settler {
+                settler.pending.retain(|&(l, corner)| l != level || !dropped.contains(&corner.map(|v| v.div_euclid(TILE as i32))));
+                settler.send(settler::Order::Forget(level, dropped.clone()));
             }
             let tiles = Arc::make_mut(&mut self.levels[level]);
             gone.extend(dropped.into_iter().filter_map(|id| tiles.remove(id)).map(|tile| Box::new(tile) as Box<dyn Send>));
@@ -1034,10 +1039,10 @@ mod tests {
         let (day, dusk) = (Brightness { sky: 1.0, sun: 1.0, glow: 0.0 }, Brightness { sky: 0.3, sun: 0.1, glow: 1.0 });
         let mut world = World::new(make(), Some(Shared::new(day)), 4);
         let before = lit(&mut world);
-        world.relight(world.shared().expect("light").under(dusk).stepping(3));
+        world.relight(world.shared().expect("light").under(dusk).settling(0.05));
         let after = lit(&mut world);
         assert!(after != before, "the light changed");
-        assert!(after == lit(&mut World::new(make(), Some(Shared::new(dusk).stepping(3)), 4)));
+        assert!(after == lit(&mut World::new(make(), Some(Shared::new(dusk).settling(0.05)), 4)));
     }
 
     /** How far the light of `a`'s bricks (`lit`) is from `b`'s, at most, of the larger: RGB9E5 read back. */

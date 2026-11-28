@@ -16,9 +16,12 @@ of the two sites beside it, then the one past it.
 Off a whole voxel, where a site beside the edge is whole too and touches it,
 all of it goes through the other: so open ground under the sky is lit
 as it should be, not two thirds as bright.
-Each level takes one step (`STEPS`; native's panel sets up to three)
-before the coarser one takes over,
+Each level takes one step before the coarser one takes over,
 or more where the coarser fills what it leaves empty.
+More would leave holes:
+18 lines a step or two apart pass between sites none reads,
+where a coarser site, as wide as they are apart, reads them all
+(more steps were tried, below).
 So light from D away comes from a level whose sites are about D across,
 which keeps what a region stops on average (the contract),
 not whether it is closed:
@@ -40,7 +43,7 @@ the line leaves by, between it and the 3 beside it in its plane
 what lies between there and where it took over unread:
 the same hand-off at every level of the octree.
 
-Three steps a level leave the tunnel ten times too bright, not hundreds,
+Three steps a level, tried, left the tunnel ten times too bright, not hundreds,
 but the lamp several times further off.
 
 The sun is one of the 18 directions.
@@ -358,10 +361,31 @@ more sites than the memory held.
 Followed as far as its light still counts, each reflection halving it as its share does,
 white walls are followed far and thin mist hardly,
 as the rounds settle late in the one and at once in the other.
+The coarser sites past a line are followed as what gets through it is halved:
+they are one light, read between four.
+Followed as if asked for, half as many sites again were, for a view no different;
+each by its share of the four, under a roof was 7% too dark.
+
+Lines are found a batch at a time, on many threads,
+then taken on one, as a site's light is found:
+with four, the moor settles in two thirds of the time, its lines in a third.
+What it holds is packed as Light's rounds keep it,
+and a site's lines keep no list of what they read:
+the cubes read keep who read them, and since when.
+So the moor held under half of what it did.
+
+What is let go is forgotten by a sweep:
+from the sites asked for, each site's depth is found anew,
+and what none reaches is forgotten
+(`what_is_let_go_is_as_if_never_asked_for`).
+A sweep costs as much as all it keeps,
+so it waits till a quarter more is kept than after the last.
+Native lets go of the bricks of the tiles the world lets go,
+so it still holds far more than is shown.
 
 What a change costs, against lighting anew:
 
-- a door cut through a wall in the sun, a few hundredths;
+- a door cut through a wall in the sun, about a tenth;
   closed again, the light comes back as it was;
 - the sun setting, most of it: every lit site changes;
 - a lamp carried a step at night, about as much:
@@ -402,7 +426,7 @@ How a site shows to hosts and to light, and what glows, is a prototype too:
   What of it falls on a whole site is lost, as a fill behind a wall is:
   in a room one site wide it glows a third as bright,
   and the white room's floor is darker for it;
-  two or three steps a level (`STEPS`), not one,
+  two or three steps a level, not one,
   would read each level only where its sites are small next to the distance,
   but against the reference they sharpen the wall's shadow
   and leave less light under the roofs and right under the lamp:

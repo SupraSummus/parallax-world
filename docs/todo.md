@@ -494,11 +494,14 @@ Numbers are for the forest at 1280×800, as measured when written.
   sites reflect on each other, so the Lights would never let them go.
 - **Two ways to find one light**: Light's rounds, and `Settling` (relax.rs),
   which keeps it settled as it changes ([light.md](light.md), "Settling as it changes").
-  The rounds could go once `Settling` forgets what is far,
-  is shared by the world's threads (a neighbour's light a moment old still settles),
-  keeps its light packed, and finds what is near first.
-  Till then, settled, native lights on one thread,
-  and what it holds, several kilobytes a site, grows as the camera goes.
+  The rounds could go once `Settling`
+  finds light, not only lines, on the world's threads
+  (a neighbour's light a moment old still settles),
+  and finds what is near first.
+  Till then, finding light and taking lines found take most of its time, on one thread.
+  Settled, native holds the light of all the world's tiles around the camera,
+  a few kilobytes a site, not only of what is shown:
+  the voxels engine tells which bricks it lacks, not which it reads.
 - **Light forgets by how many sites it began, not by what they hold** (`KEPT_SITES`),
   each level by its own, the same number for each,
   though each byte a site keeps costs time too,
