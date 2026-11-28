@@ -1,4 +1,4 @@
-//! Mechanics in the world (mechanics/, docs/mechanics.md), on a thread of
+//! Mechanics in the world (local/, docs/mechanics.md), on a thread of
 //! its own, which the thread that draws never waits for (threads.rs), and
 //! shown as it moves.
 //!
@@ -15,7 +15,7 @@ use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};
 use std::time::Duration;
 
 use lattice::{ALPHA, FACE_KINDS, FastMap, FastSet, Holds, VOXEL_FACES, opposite};
-use mechanics::{Cell, Lattice, Material, Matter, WOOD, about, faces};
+use local::{Cell, Lattice, Material, Matter, WOOD, about, faces};
 use web_time::Instant;
 use worldgen::edits::{Sites, holds};
 use worldgen::grid::{Held, VoxelGrid};

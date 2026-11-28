@@ -1,7 +1,9 @@
 # Mechanics
 
 Matter that moves, bends and breaks, on the voxels:
-the crate `mechanics/`, driven by `native/src/mechanics.rs`.
+the crate `mechanics/`;
+`native/src/mechanics.rs` drives `local/` in its place while that is tried
+([By local rules](#by-local-rules)).
 The lattice never moves; matter moves between its sites.
 A tree standing, cut and toppling, and lying where it lands are one model,
 and statics is its rest.
@@ -132,8 +134,8 @@ and the changes show when due.
 
 ## By local rules
 
-`local/` has this model's interface (`native/src/mechanics.rs` takes it by changing one import),
-and is to take its place once it is fast enough.
+`local/` has this model's interface, and is to take its place
+once it is fast enough.
 In it, a cell's matter moves by rules that read it and its neighbours only.
 Its tests take minutes, so pnpm leaves them out (`cargo test --release -p local`).
 Of `native/src/mechanics.rs`'s tests it fails that of two cuts in a row;

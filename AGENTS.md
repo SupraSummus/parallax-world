@@ -118,12 +118,12 @@ worlds/                      # The worlds, on worldgen's and ground's public API
 │                            # scenes/ is not in git (docs/generators.md, "Scenes")
 ├── tests/                   # Its worlds keep the contract and their cost baselines (checks.rs); scenes
 └── examples/                # map, look, places, check, cost, bench: a world looked at, checked, measured
-mechanics/src/               # Mechanics on the voxels (docs/mechanics.md), driven by native/src/mechanics.rs
+mechanics/src/               # Mechanics on the voxels (docs/mechanics.md), local/ in its place
 ├── lib.rs                   # Matter: cells welded across faces where both hold on, contacts; a step; hops
 ├── element.rs               # A cell as a finite element: a co-rotated cube of eight nodes
 ├── solve.rs                 # Conjugate gradients, V-cycles over the octree
 └── tests.rs                 # Posts dropped, toppling, holding on or not; beams out of a wall, spinning
-local/src/                   # Mechanics by local rules, to take mechanics/'s place (docs/mechanics.md, "By local rules")
+local/src/                   # Mechanics by local rules (docs/mechanics.md, "By local rules"), driven by native/src/mechanics.rs
 ├── lib.rs                   # Cells as rigid cubes, beams across the faces they hold on across; explicit steps
 ├── crew.rs                  # Threads that work a step's rounds together, a barrier between phases
 └── tests.rs                 # mechanics/'s tests, on it; the same on one thread and on several
